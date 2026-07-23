@@ -1,22 +1,30 @@
 FROM python:3.12-slim-bookworm
 
-# Stale builder base images often miss rotated Debian archive keys (NO_PUBKEY).
-# Refresh keyring first, then install OCR/runtime deps.
-RUN set -eux; \
-    apt-get -o Acquire::AllowInsecureRepositories=true \
-            -o Acquire::AllowDowngradeToInsecureRepositories=true \
-            update; \
-    apt-get install -y --allow-unauthenticated --no-install-recommends \
-        ca-certificates \
-        debian-archive-keyring; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
+# Root cause of NO_PUBKEY on builders: Debian rotated archive signing keys, but
+# older python:*-slim-bookworm layers still ship debian-archive-keyring << 2025.1.
+# apt cannot fetch the new keyring (chicken/egg), and "AllowInsecureRepositories"
+# still exits 100 on bookworm. Install the current keyring via HTTPS + dpkg first.
+RUN python - <<'PY'
+from urllib.request import urlretrieve
+import subprocess
+
+url = (
+    "https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/"
+    "debian-archive-keyring_2025.1_all.deb"
+)
+path = "/tmp/debian-archive-keyring.deb"
+urlretrieve(url, path)
+subprocess.check_call(["dpkg", "-i", path])
+PY
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         tesseract-ocr-ces \
         tesseract-ocr-eng \
         poppler-utils \
-        libheif1; \
-    rm -rf /var/lib/apt/lists/*
+        libheif1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
