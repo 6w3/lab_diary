@@ -1,23 +1,22 @@
-FROM python:3.12-slim-bookworm
+FROM python:3.12-alpine
 
-# Root cause of NO_PUBKEY on builders: Debian rotated archive signing keys, but
-# older python:*-slim-bookworm layers still ship debian-archive-keyring << 2025.1.
-# apt cannot fetch the new keyring (chicken/egg). Install current keyring via
-# HTTPS + dpkg first. Use python -c (not a shell heredoc): classic Docker on the
-# VPS parses a bare "from ..." line as a Dockerfile FROM instruction.
-RUN python -c "from urllib.request import urlretrieve; import subprocess; \
-url='https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb'; \
-path='/tmp/debian-archive-keyring.deb'; urlretrieve(url, path); \
-subprocess.check_call(['dpkg', '-i', path])"
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        tesseract-ocr \
-        tesseract-ocr-ces \
-        tesseract-ocr-eng \
-        poppler-utils \
-        libheif1 \
-    && rm -rf /var/lib/apt/lists/*
+# Root cause on this VPS builder:
+# 1) Debian slim apt fails (rotated archive keys)
+# 2) Bootstrapping keyring via dpkg hits lzma "Cannot allocate memory"
+#    under host cgroup RAM pressure — tesseract apt install would too.
+# Alpine + apk avoids both. Pure Python deps install from musllinux wheels
+# (no gcc), so the build stays light on RAM.
+RUN apk add --no-cache \
+    tesseract-ocr \
+    tesseract-ocr-data-ces \
+    tesseract-ocr-data-eng \
+    poppler-utils \
+    libheif \
+    jpeg \
+    zlib \
+    freetype \
+    libffi \
+    openssl
 
 WORKDIR /app
 
