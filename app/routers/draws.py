@@ -10,7 +10,8 @@ from fastapi.templating import Jinja2Templates
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, CustomMarker, DrawConditions, Marker, ResultValue
-from app.services.storage import run_ocr, save_upload
+from app.services.markers import match_marker
+from app.services.storage import normalize_unit, run_ocr, save_upload
 
 router = APIRouter(prefix="/draws", tags=["draws"])
 templates = Jinja2Templates(directory="app/templates")
@@ -232,16 +233,24 @@ async def upload_files(
             raw, proposals = run_ocr(storage_path)
             att.ocr_raw_text = raw
             att.ocr_status = "done"
+            catalog = db.query(Marker).all()
             for p in proposals:
+                matched = match_marker(p.get("label") or "", catalog)
+                label = matched.name_cs if matched else p.get("label")
+                unit = p.get("unit") or ""
+                if matched and not unit:
+                    unit = matched.default_unit
                 db.add(
                     ResultValue(
                         blood_draw_id=draw.id,
+                        attachment_id=att.id,
+                        marker_code=matched.code if matched else None,
                         value=p["value"],
-                        unit=p.get("unit") or "",
+                        unit=unit,
                         lab_ref_low=p.get("lab_ref_low"),
                         lab_ref_high=p.get("lab_ref_high"),
                         confirmed=False,
-                        label=p.get("label"),
+                        label=label,
                     )
                 )
         except Exception as exc:  # noqa: BLE001
@@ -268,9 +277,10 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             "lab_ref_low": r.lab_ref_low,
             "lab_ref_high": r.lab_ref_high,
             "id": r.id,
+            "marker_code": r.marker_code,
         }
         for r in draw.results
-        if not r.confirmed
+        if not r.confirmed and r.attachment_id == att.id
     ]
     return templates.TemplateResponse(
         request,
@@ -287,28 +297,29 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
     form = await request.form()
     selected = set(form.getlist("selected"))
     count = int(form.get("count") or 0)
-    pending = [r for r in draw.results if not r.confirmed]
+    pending = [r for r in draw.results if not r.confirmed and r.attachment_id == attachment_id]
+    catalog = db.query(Marker).all()
     for idx in range(count):
         if str(idx) not in selected or idx >= len(pending):
             continue
         row = pending[idx]
         row.label = form.get(f"label_{idx}") or row.label
         row.value = float(form.get(f"value_{idx}"))
-        row.unit = form.get(f"unit_{idx}") or ""
+        row.unit = normalize_unit(form.get(f"unit_{idx}") or "")
         low = form.get(f"low_{idx}")
         high = form.get(f"high_{idx}")
         row.lab_ref_low = float(low) if low else None
         row.lab_ref_high = float(high) if high else None
-        # try match catalog by label
-        label_l = (row.label or "").lower()
-        markers = db.query(Marker).all()
-        for m in markers:
-            if m.name_cs.lower() in label_l or m.name_en.lower() in label_l or m.code in label_l:
-                row.marker_code = m.code
-                if not row.unit:
-                    row.unit = m.default_unit
-                break
-        if not row.marker_code and row.label:
+        matched = match_marker(row.label or "", catalog)
+        if matched:
+            row.marker_code = matched.code
+            row.custom_marker_id = None
+            if not row.unit:
+                row.unit = matched.default_unit
+            # Prefer catalog Czech name in stored label after confirm
+            row.label = matched.name_cs
+        elif row.label:
+            row.marker_code = None
             existing = (
                 db.query(CustomMarker)
                 .filter(CustomMarker.user_id == user.id, CustomMarker.name == row.label)
@@ -320,7 +331,7 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
                 db.flush()
             row.custom_marker_id = existing.id
         row.confirmed = True
-    # delete unselected pending
+    # delete unselected pending for this attachment only
     for idx, row in enumerate(pending):
         if str(idx) not in selected:
             db.delete(row)

@@ -141,6 +141,9 @@ class ResultValue(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     blood_draw_id: Mapped[int] = mapped_column(ForeignKey("blood_draws.id", ondelete="CASCADE"), index=True)
+    attachment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("attachments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     marker_code: Mapped[str | None] = mapped_column(ForeignKey("markers.code"), nullable=True)
     custom_marker_id: Mapped[int | None] = mapped_column(
         ForeignKey("custom_markers.id", ondelete="SET NULL"), nullable=True
@@ -153,5 +156,6 @@ class ResultValue(Base):
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     blood_draw: Mapped[BloodDraw] = relationship(back_populates="results")
+    attachment: Mapped[Attachment | None] = relationship()
     marker: Mapped[Marker | None] = relationship()
     custom_marker: Mapped[CustomMarker | None] = relationship(back_populates="results")

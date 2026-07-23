@@ -2,6 +2,9 @@ services:
   db:
     image: mariadb:11
     restart: unless-stopped
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
     environment:
       MYSQL_ROOT_PASSWORD: root
       MYSQL_DATABASE: lab_diary
@@ -25,7 +28,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: mysql+pymysql://lab_diary:lab_diary@db:3306/lab_diary
+      DATABASE_URL: mysql+pymysql://lab_diary:lab_diary@db:3306/lab_diary?charset=utf8mb4
       UPLOAD_DIR: /data/uploads
     volumes:
       - ./uploads:/data/uploads
