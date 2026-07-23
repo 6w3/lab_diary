@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t('reset_password') }}</h1>
+<form method="post" action="/auth/reset" class="card">
+  <input type="hidden" name="token" value="{{ token }}">
+  <label>{{ t('new_password') }}
+    <input type="password" name="password" minlength="8" required>
+  </label>
+  <button type="submit">{{ t('save') }}</button>
+</form>
+{% endblock %}

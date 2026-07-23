@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}{{ draw.lab_name }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>{{ draw.drawn_at.strftime('%Y-%m-%d %H:%M') }}</h1>
+  <div>
+    <a class="btn secondary" href="/draws/{{ draw.id }}/edit">Edit</a>
+    <form method="post" action="/draws/{{ draw.id }}/delete" style="display:inline" onsubmit="return confirm('OK?')">
+      <button type="submit" class="danger">{{ t('delete') }}</button>
+    </form>
+  </div>
+</div>
+<p><strong>{{ t('lab_name') }}:</strong> {{ draw.lab_name }}
+  {% if draw.workplace %} / {{ draw.workplace }}{% endif %}
+</p>
+
+{% if draw.conditions %}
+<section class="card">
+  <h2>{{ t('conditions') }}</h2>
+  <ul class="meta">
+    {% if draw.conditions.fasting is not none %}<li>{{ t('fasting') }}: {{ t('yes') if draw.conditions.fasting else t('no') }}</li>{% endif %}
+    {% if draw.conditions.weight_kg is not none %}<li>{{ t('weight_kg') }}: {{ draw.conditions.weight_kg }}</li>{% endif %}
+    {% if draw.conditions.last_hard_training %}<li>{{ t('last_hard_training') }}: {{ draw.conditions.last_hard_training }}</li>{% endif %}
+    {% if draw.conditions.sleep_score is not none %}<li>{{ t('sleep_score') }}: {{ draw.conditions.sleep_score }}</li>{% endif %}
+    {% if draw.conditions.cycle_day %}<li>{{ t('cycle_day') }}: {{ draw.conditions.cycle_day }}</li>{% endif %}
+    {% if draw.conditions.contraception is not none %}<li>{{ t('contraception') }}: {{ t('yes') if draw.conditions.contraception else t('no') }}</li>{% endif %}
+    {% if draw.conditions.illness_14d is not none %}<li>{{ t('illness_14d') }}: {{ t('yes') if draw.conditions.illness_14d else t('no') }}</li>{% endif %}
+    {% if draw.conditions.supplements %}<li>{{ t('supplements') }}: {{ draw.conditions.supplements }}</li>{% endif %}
+    {% if draw.conditions.notes %}<li>{{ t('notes') }}: {{ draw.conditions.notes }}</li>{% endif %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>{{ t('attachments') }}</h2>
+  <form method="post" action="/draws/{{ draw.id }}/upload" enctype="multipart/form-data">
+    <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
+    <button type="submit">{{ t('upload') }}</button>
+  </form>
+  <ul>
+    {% for a in draw.attachments %}
+      <li>{{ a.filename }} — {{ a.ocr_status }}
+        {% if a.ocr_status == 'done' %}
+          <a href="/draws/{{ draw.id }}/ocr/{{ a.id }}">{{ t('ocr_review') }}</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="card">
+  <h2>{{ t('results') }}</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>{{ t('marker') }}</th>
+        <th>{{ t('value') }}</th>
+        <th>{{ t('unit') }}</th>
+        <th>{{ t('lab_ref') }}</th>
+        <th>{{ t('app_tip_ref') }}</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in confirmed_results %}
+        <tr>
+          <td>{{ r.display_name }}</td>
+          <td>{{ r.value }}</td>
+          <td>{{ r.unit }}</td>
+          <td>{% if r.lab_ref_low is not none or r.lab_ref_high is not none %}{{ r.lab_ref_low }}–{{ r.lab_ref_high }}{% endif %}</td>
+          <td>{% if r.tip_low is not none or r.tip_high is not none %}{{ r.tip_low }}–{{ r.tip_high }}{% endif %}</td>
+          <td>
+            <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/delete">
+              <button type="submit" class="link">{{ t('delete') }}</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h3>{{ t('add_result') }}</h3>
+  <form method="post" action="/draws/{{ draw.id }}/results" class="inline-form">
+    <select name="marker_code">
+      <option value="">—</option>
+      {% for m in markers %}
+        <option value="{{ m.code }}">{{ m.name_cs if locale == 'cs' else m.name_en }} ({{ m.default_unit }})</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="custom_name" placeholder="{{ t('custom_marker') }}">
+    <input type="number" step="any" name="value" required placeholder="{{ t('value') }}">
+    <input type="text" name="unit" placeholder="{{ t('unit') }}">
+    <input type="number" step="any" name="lab_ref_low" placeholder="low">
+    <input type="number" step="any" name="lab_ref_high" placeholder="high">
+    <button type="submit">{{ t('save') }}</button>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ t('draws_title') }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<div class="row">
+  <h1>{{ t('draws_title') }}</h1>
+  <a class="btn" href="/draws/new">{{ t('new_draw') }}</a>
+</div>
+{% if not draws %}
+  <p>{{ t('empty_draws') }}</p>
+{% else %}
+  <ul class="list">
+    {% for d in draws %}
+      <li>
+        <a href="/draws/{{ d.id }}">
+          <strong>{{ d.drawn_at.strftime('%Y-%m-%d %H:%M') }}</strong>
+          — {{ d.lab_name }}
+        </a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

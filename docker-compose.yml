@@ -1,0 +1,38 @@
+services:
+  db:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: lab_diary
+      MYSQL_USER: lab_diary
+      MYSQL_PASSWORD: lab_diary
+    ports:
+      - "3307:3306"
+    volumes:
+      - lab_diary_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mysql+pymysql://lab_diary:lab_diary@db:3306/lab_diary
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - ./uploads:/data/uploads
+      - ./app:/app/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  lab_diary_db_data:

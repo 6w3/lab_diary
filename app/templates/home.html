@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>{{ t('app_name') }}</h1>
+  <p>{{ t('tagline') }}</p>
+  {% if not user %}
+    <p>
+      <a class="btn" href="/auth/register">{{ t('register') }}</a>
+      <a class="btn secondary" href="/auth/login">{{ t('login') }}</a>
+    </p>
+  {% else %}
+    <p><a class="btn" href="/draws">{{ t('nav_draws') }}</a></p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ t('account_title') }}{% endblock %}
+{% block content %}
+<h1>{{ t('account_title') }}</h1>
+<p>{{ t('email') }}: <strong>{{ user.email }}</strong></p>
+<form method="post" action="/account/locale" class="card">
+  <label>{{ t('language') }}
+    <select name="locale">
+      <option value="cs" {% if user.locale == 'cs' %}selected{% endif %}>Čeština</option>
+      <option value="en" {% if user.locale == 'en' %}selected{% endif %}>English</option>
+    </select>
+  </label>
+  <button type="submit">{{ t('save') }}</button>
+</form>
+
+<form method="post" action="/account/delete" class="card danger-zone"
+      onsubmit="return confirm('{{ t('delete_account_confirm') }}')">
+  <button type="submit" class="danger">{{ t('delete_account') }}</button>
+</form>
+{% endblock %}

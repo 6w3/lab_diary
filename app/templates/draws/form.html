@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ t('new_draw') }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<h1>{{ t('new_draw') if not draw else t('nav_draws') }}</h1>
+<form method="post" action="{{ action }}" class="card">
+  <label>{{ t('drawn_at') }} ({{ t('required') }})
+    <input type="datetime-local" name="drawn_at" required
+      value="{{ drawn_at_value }}">
+  </label>
+  <label>{{ t('lab_name') }} ({{ t('required') }})
+    <input type="text" name="lab_name" required value="{{ draw.lab_name if draw else '' }}">
+  </label>
+  <label>{{ t('workplace') }} ({{ t('optional') }})
+    <input type="text" name="workplace" value="{{ draw.workplace if draw and draw.workplace else '' }}">
+  </label>
+
+  <h2>{{ t('conditions') }}</h2>
+  <label class="check"><input type="checkbox" name="fasting" value="1" {% if c and c.fasting %}checked{% endif %}> {{ t('fasting') }}</label>
+  <label>{{ t('weight_kg') }}
+    <input type="number" step="0.1" name="weight_kg" value="{{ c.weight_kg if c and c.weight_kg is not none else '' }}">
+  </label>
+  <label>{{ t('last_hard_training') }}
+    <input type="text" name="last_hard_training" value="{{ c.last_hard_training if c and c.last_hard_training else '' }}">
+  </label>
+  <label>{{ t('sleep_score') }}
+    <input type="number" min="1" max="10" name="sleep_score" value="{{ c.sleep_score if c and c.sleep_score is not none else '' }}">
+  </label>
+  <label>{{ t('cycle_day') }}
+    <input type="text" name="cycle_day" value="{{ c.cycle_day if c and c.cycle_day else '' }}">
+  </label>
+  <label class="check"><input type="checkbox" name="contraception" value="1" {% if c and c.contraception %}checked{% endif %}> {{ t('contraception') }}</label>
+  <label class="check"><input type="checkbox" name="illness_14d" value="1" {% if c and c.illness_14d %}checked{% endif %}> {{ t('illness_14d') }}</label>
+  <label>{{ t('supplements') }}
+    <input type="text" name="supplements" value="{{ c.supplements if c and c.supplements else '' }}">
+  </label>
+  <label>{{ t('notes') }}
+    <textarea name="notes" rows="4">{{ c.notes if c and c.notes else '' }}</textarea>
+  </label>
+  <button type="submit">{{ t('save') }}</button>
+</form>
+{% endblock %}

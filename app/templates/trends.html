@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ t('trends_title') }}{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+{% endblock %}
+{% block content %}
+<h1>{{ t('trends_title') }}</h1>
+<form method="get" action="/trends" class="card">
+  <label>{{ t('select_marker') }}
+    <select name="marker" onchange="this.form.submit()">
+      <option value="">—</option>
+      {% for m in markers %}
+        <option value="{{ m.code }}" {% if selected == m.code %}selected{% endif %}>
+          {{ m.name_cs if locale == 'cs' else m.name_en }}
+        </option>
+      {% endfor %}
+      {% for cm in custom_markers %}
+        <option value="custom:{{ cm.id }}" {% if selected == 'custom:' ~ cm.id %}selected{% endif %}>
+          {{ cm.name }} ({{ t('custom_marker') }})
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+</form>
+
+{% if has_chart %}
+<canvas id="trendChart" height="120"></canvas>
+<script>
+const ctx = document.getElementById('trendChart');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: {{ chart_labels_json | safe }},
+    datasets: [{
+      label: {{ chart_label_json | safe }},
+      data: {{ chart_values_json | safe }},
+      borderColor: '#1f5c4a',
+      tension: 0.2
+    }]
+  },
+  options: {
+    scales: {
+      y: { beginAtZero: false }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}{{ t('ocr_review') }}{% endblock %}
+{% block content %}
+<h1>{{ t('ocr_review') }}</h1>
+<form method="post" action="/draws/{{ draw.id }}/ocr/{{ attachment.id }}/confirm">
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th>{{ t('marker') }}</th>
+        <th>{{ t('value') }}</th>
+        <th>{{ t('unit') }}</th>
+        <th>{{ t('lab_ref') }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in proposals %}
+        <tr>
+          <td><input type="checkbox" name="selected" value="{{ loop.index0 }}" checked></td>
+          <td><input type="text" name="label_{{ loop.index0 }}" value="{{ r.label }}"></td>
+          <td><input type="number" step="any" name="value_{{ loop.index0 }}" value="{{ r.value }}"></td>
+          <td><input type="text" name="unit_{{ loop.index0 }}" value="{{ r.unit }}"></td>
+          <td>
+            <input type="number" step="any" name="low_{{ loop.index0 }}" value="{{ r.lab_ref_low if r.lab_ref_low is not none else '' }}" style="width:5rem">
+            –
+            <input type="number" step="any" name="high_{{ loop.index0 }}" value="{{ r.lab_ref_high if r.lab_ref_high is not none else '' }}" style="width:5rem">
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <input type="hidden" name="count" value="{{ proposals|length }}">
+  <button type="submit">{{ t('confirm_results') }}</button>
+</form>
+<details>
+  <summary>OCR raw</summary>
+  <pre>{{ attachment.ocr_raw_text }}</pre>
+</details>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ t('nav_login') }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<h1>{{ t('nav_login') }}</h1>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<form method="post" action="/auth/login" class="card">
+  <label>{{ t('email') }}
+    <input type="email" name="email" required>
+  </label>
+  <label>{{ t('password') }}
+    <input type="password" name="password" required>
+  </label>
+  <button type="submit">{{ t('login') }}</button>
+</form>
+<p class="muted">{{ t('or') }}</p>
+<p>
+  {% if google_enabled %}<a class="btn secondary" href="/auth/google">{{ t('login_google') }}</a>{% endif %}
+  {% if apple_enabled %}<a class="btn secondary" href="/auth/apple">{{ t('login_apple') }}</a>{% endif %}
+</p>
+<p><a href="/auth/forgot">{{ t('forgot_password') }}</a></p>
+<p><a href="/auth/register">{{ t('register') }}</a></p>
+{% endblock %}

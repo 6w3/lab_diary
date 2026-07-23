@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t('verify_required') }}</h1>
+<p>{{ t('email') }}: <strong>{{ user.email }}</strong></p>
+<form method="post" action="/auth/resend-verify">
+  <button type="submit">Resend / Znovu odeslat</button>
+</form>
+{% endblock %}

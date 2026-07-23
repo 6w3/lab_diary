@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ t('app_name') }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/">{{ t('app_name') }}</a>
+    <nav>
+      {% if user and user.email_verified %}
+        <a href="/draws">{{ t('nav_draws') }}</a>
+        <a href="/trends">{{ t('nav_trends') }}</a>
+        <a href="/account">{{ t('nav_account') }}</a>
+        <a href="/auth/logout">{{ t('nav_logout') }}</a>
+      {% elif user %}
+        <a href="/auth/verify-pending">{{ t('verify_required') }}</a>
+        <a href="/auth/logout">{{ t('nav_logout') }}</a>
+      {% else %}
+        <a href="/auth/login">{{ t('nav_login') }}</a>
+        <a href="/auth/register">{{ t('nav_register') }}</a>
+      {% endif %}
+      <form class="locale-form" method="post" action="/locale">
+        <select name="locale" onchange="this.form.submit()">
+          <option value="cs" {% if locale == 'cs' %}selected{% endif %}>CS</option>
+          <option value="en" {% if locale == 'en' %}selected{% endif %}>EN</option>
+        </select>
+      </form>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    {% if flash %}
+      <div class="flash">{{ flash }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="foot">
+    <p class="disclaimer">{{ disclaimer }}</p>
+  </footer>
+</body>
+</html>

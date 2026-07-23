@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t('forgot_password') }}</h1>
+<form method="post" action="/auth/forgot" class="card">
+  <label>{{ t('email') }}
+    <input type="email" name="email" required>
+  </label>
+  <button type="submit">{{ t('reset_password') }}</button>
+</form>
+{% endblock %}
