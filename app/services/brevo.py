@@ -11,10 +11,11 @@ logger = logging.getLogger(__name__)
 
 def send_email(*, to_email: str, subject: str, html_content: str, settings: Settings | None = None) -> None:
     settings = settings or get_settings()
+    # Local/dev: always log instead of calling Brevo (even if key is set).
+    if settings.dev_log_email:
+        logger.warning("DEV email to=%s subject=%s\n%s", to_email, subject, html_content)
+        return
     if not settings.brevo_api_key:
-        if settings.dev_log_email:
-            logger.warning("DEV email to=%s subject=%s\n%s", to_email, subject, html_content)
-            return
         raise RuntimeError("BREVO_API_KEY is not configured")
 
     payload = {
@@ -33,7 +34,10 @@ def send_email(*, to_email: str, subject: str, html_content: str, settings: Sett
         json=payload,
         timeout=30.0,
     )
-    response.raise_for_status()
+    if response.is_error:
+        detail = response.text[:500]
+        logger.error("Brevo send failed status=%s body=%s", response.status_code, detail)
+        raise RuntimeError(f"Brevo email failed ({response.status_code}): {detail}") from None
 
 
 def send_verification_email(to_email: str, verify_url: str, locale: str = "cs") -> None:

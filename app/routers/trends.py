@@ -46,6 +46,7 @@ def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, marker
             chart_values.append(result.value)
 
     return templates.TemplateResponse(
+        request,
         "trends.html",
         template_context(
             request,

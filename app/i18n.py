@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-LOCALES_DIR = Path(__file__).resolve().parent.parent / "locales"
+LOCALES_DIR = Path(__file__).resolve().parent / "locales"
 
 _CACHE: dict[str, dict[str, str]] = {}
 

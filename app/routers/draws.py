@@ -93,6 +93,7 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "draws/list.html",
         template_context(request, locale, draws=draws),
     )
@@ -101,6 +102,7 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
 @router.get("/new", response_class=HTMLResponse)
 def new_draw_form(request: Request, locale: LocaleDep, user: UserDep):
     return templates.TemplateResponse(
+        request,
         "draws/form.html",
         template_context(
             request,
@@ -141,6 +143,7 @@ def draw_detail(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, d
         return redirect("/draws")
     markers = db.query(Marker).order_by(Marker.code).all()
     return templates.TemplateResponse(
+        request,
         "draws/detail.html",
         template_context(
             request,
@@ -159,6 +162,7 @@ def edit_draw_form(request: Request, db: DbDep, locale: LocaleDep, user: UserDep
         return redirect("/draws")
     drawn_at_value = draw.drawn_at.strftime("%Y-%m-%dT%H:%M")
     return templates.TemplateResponse(
+        request,
         "draws/form.html",
         template_context(
             request,
@@ -269,6 +273,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
         if not r.confirmed
     ]
     return templates.TemplateResponse(
+        request,
         "draws/ocr_review.html",
         template_context(request, locale, draw=draw, attachment=att, proposals=proposals),
     )

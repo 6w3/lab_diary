@@ -22,14 +22,6 @@ settings = get_settings()
 templates = Jinja2Templates(directory="app/templates")
 
 app = FastAPI(title="Lab Diary")
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=settings.secret_key,
-    session_cookie=settings.session_cookie_name,
-    max_age=settings.session_max_age,
-    same_site="lax",
-    https_only=settings.app_base_url.startswith("https"),
-)
 
 static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -43,6 +35,7 @@ app.include_router(account.router)
 
 @app.middleware("http")
 async def load_user(request: Request, call_next):
+    # Runs inside SessionMiddleware (added last = outermost).
     request.state.user = None
     user_id = request.session.get("user_id")
     if user_id:
@@ -53,6 +46,16 @@ async def load_user(request: Request, call_next):
             db.close()
     return await call_next(request)
 
+
+# Must be added AFTER @app.middleware so SessionMiddleware is outermost.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.secret_key,
+    session_cookie=settings.session_cookie_name,
+    max_age=settings.session_max_age,
+    same_site="lax",
+    https_only=settings.app_base_url.startswith("https"),
+)
 
 @app.exception_handler(StarletteHTTPException)
 async def redirect_http_exception(request: Request, exc: StarletteHTTPException):
@@ -78,7 +81,9 @@ def health():
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, locale: LocaleDep, user: OptionalUserDep):
-    return templates.TemplateResponse("home.html", template_context(request, locale))
+    return templates.TemplateResponse(
+        request,
+        "home.html", template_context(request, locale))
 
 
 @app.post("/locale")

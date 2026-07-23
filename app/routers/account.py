@@ -16,7 +16,9 @@ templates = Jinja2Templates(directory="app/templates")
 
 @router.get("", response_class=HTMLResponse)
 def account_page(request: Request, locale: LocaleDep, user: UserDep):
-    return templates.TemplateResponse("account.html", template_context(request, locale))
+    return templates.TemplateResponse(
+        request,
+        "account.html", template_context(request, locale))
 
 
 @router.post("/locale")

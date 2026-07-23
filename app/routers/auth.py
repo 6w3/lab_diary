@@ -31,6 +31,7 @@ def _oauth_flags():
 @router.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, locale: LocaleDep, error: str | None = None):
     return templates.TemplateResponse(
+        request,
         "auth/login.html",
         template_context(request, locale, error=error, **_oauth_flags()),
     )
@@ -47,7 +48,8 @@ def login(
     user = db.query(User).filter(User.email == email.lower().strip()).first()
     if not user or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
-            "auth/login.html",
+        request,
+        "auth/login.html",
             template_context(request, locale, error="Invalid credentials", **_oauth_flags()),
             status_code=400,
         )
@@ -61,6 +63,7 @@ def login(
 @router.get("/register", response_class=HTMLResponse)
 def register_form(request: Request, locale: LocaleDep, error: str | None = None):
     return templates.TemplateResponse(
+        request,
         "auth/register.html",
         template_context(request, locale, error=error, **_oauth_flags()),
     )
@@ -77,13 +80,15 @@ def register(
     email_norm = email.lower().strip()
     if db.query(User).filter(User.email == email_norm).first():
         return templates.TemplateResponse(
-            "auth/register.html",
+        request,
+        "auth/register.html",
             template_context(request, locale, error="Email already registered", **_oauth_flags()),
             status_code=400,
         )
     if len(password) < 8:
         return templates.TemplateResponse(
-            "auth/register.html",
+        request,
+        "auth/register.html",
             template_context(request, locale, error="Password too short", **_oauth_flags()),
             status_code=400,
         )
@@ -120,6 +125,7 @@ def verify_pending(request: Request, locale: LocaleDep, user: OptionalUserDep):
     if user.email_verified:
         return redirect("/draws")
     return templates.TemplateResponse(
+        request,
         "auth/verify_pending.html",
         template_context(request, locale),
     )
@@ -143,7 +149,9 @@ def logout(request: Request):
 
 @router.get("/forgot", response_class=HTMLResponse)
 def forgot_form(request: Request, locale: LocaleDep):
-    return templates.TemplateResponse("auth/forgot.html", template_context(request, locale))
+    return templates.TemplateResponse(
+        request,
+        "auth/forgot.html", template_context(request, locale))
 
 
 @router.post("/forgot")
@@ -159,6 +167,7 @@ def forgot(db: DbDep, locale: LocaleDep, email: str = Form(...)):
 @router.get("/reset", response_class=HTMLResponse)
 def reset_form(request: Request, locale: LocaleDep, token: str):
     return templates.TemplateResponse(
+        request,
         "auth/reset.html",
         template_context(request, locale, token=token),
     )
