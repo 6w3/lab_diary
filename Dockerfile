@@ -2,20 +2,13 @@ FROM python:3.12-slim-bookworm
 
 # Root cause of NO_PUBKEY on builders: Debian rotated archive signing keys, but
 # older python:*-slim-bookworm layers still ship debian-archive-keyring << 2025.1.
-# apt cannot fetch the new keyring (chicken/egg), and "AllowInsecureRepositories"
-# still exits 100 on bookworm. Install the current keyring via HTTPS + dpkg first.
-RUN python - <<'PY'
-from urllib.request import urlretrieve
-import subprocess
-
-url = (
-    "https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/"
-    "debian-archive-keyring_2025.1_all.deb"
-)
-path = "/tmp/debian-archive-keyring.deb"
-urlretrieve(url, path)
-subprocess.check_call(["dpkg", "-i", path])
-PY
+# apt cannot fetch the new keyring (chicken/egg). Install current keyring via
+# HTTPS + dpkg first. Use python -c (not a shell heredoc): classic Docker on the
+# VPS parses a bare "from ..." line as a Dockerfile FROM instruction.
+RUN python -c "from urllib.request import urlretrieve; import subprocess; \
+url='https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb'; \
+path='/tmp/debian-archive-keyring.deb'; urlretrieve(url, path); \
+subprocess.check_call(['dpkg', '-i', path])"
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
