@@ -11,6 +11,7 @@
         <th>{{ t('value') }}</th>
         <th>{{ t('unit') }}</th>
         <th>{{ t('lab_ref') }}</th>
+        <th>{{ t('result_note') }}</th>
       </tr>
     </thead>
     <tbody>
@@ -25,6 +26,7 @@
             –
             <input type="number" step="any" name="high_{{ loop.index0 }}" value="{{ r.lab_ref_high if r.lab_ref_high is not none else '' }}" style="width:5rem">
           </td>
+          <td><input type="text" name="notes_{{ loop.index0 }}" value="{{ r.notes }}" placeholder="{{ t('optional') }}"></td>
         </tr>
       {% endfor %}
     </tbody>

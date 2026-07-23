@@ -92,6 +92,8 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
 th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: left; vertical-align: top; }
 .inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.note-form { flex-wrap: nowrap; align-items: center; }
+.note-form input[type="text"] { min-width: 8rem; flex: 1; }
 .locale-form { margin: 0; }
 .locale-form select { padding: 0.25rem; }
 .meta { padding-left: 1.1rem; }

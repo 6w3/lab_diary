@@ -154,6 +154,7 @@ class ResultValue(Base):
     lab_ref_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     blood_draw: Mapped[BloodDraw] = relationship(back_populates="results")
     attachment: Mapped[Attachment | None] = relationship()

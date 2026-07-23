@@ -2,7 +2,7 @@
 {% block title %}{{ draw.lab_name }} — {{ t('app_name') }}{% endblock %}
 {% block content %}
 <div class="row">
-  <h1>{{ draw.drawn_at.strftime('%Y-%m-%d %H:%M') }}</h1>
+  <h1>{{ draw.drawn_at.strftime('%Y-%m-%d') }}</h1>
   <div>
     <a class="btn secondary" href="/draws/{{ draw.id }}/edit">Edit</a>
     <form method="post" action="/draws/{{ draw.id }}/delete" style="display:inline" onsubmit="return confirm('OK?')">
@@ -58,6 +58,7 @@
         <th>{{ t('unit') }}</th>
         <th>{{ t('lab_ref') }}</th>
         <th>{{ t('app_tip_ref') }}</th>
+        <th>{{ t('result_note') }}</th>
         <th></th>
       </tr>
     </thead>
@@ -69,6 +70,12 @@
           <td>{{ r.unit }}</td>
           <td>{% if r.lab_ref_low is not none or r.lab_ref_high is not none %}{{ r.lab_ref_low }}–{{ r.lab_ref_high }}{% endif %}</td>
           <td>{% if r.tip_low is not none or r.tip_high is not none %}{{ r.tip_low }}–{{ r.tip_high }}{% endif %}</td>
+          <td>
+            <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/notes" class="inline-form note-form">
+              <input type="text" name="notes" value="{{ r.notes or '' }}" placeholder="{{ t('result_note') }}">
+              <button type="submit" class="link">{{ t('save') }}</button>
+            </form>
+          </td>
           <td>
             <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/delete">
               <button type="submit" class="link">{{ t('delete') }}</button>
@@ -92,6 +99,7 @@
     <input type="text" name="unit" placeholder="{{ t('unit') }}">
     <input type="number" step="any" name="lab_ref_low" placeholder="low">
     <input type="number" step="any" name="lab_ref_high" placeholder="high">
+    <input type="text" name="notes" placeholder="{{ t('result_note') }}">
     <button type="submit">{{ t('save') }}</button>
   </form>
 </section>

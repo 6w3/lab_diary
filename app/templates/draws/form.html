@@ -4,8 +4,7 @@
 <h1>{{ t('new_draw') if not draw else t('nav_draws') }}</h1>
 <form method="post" action="{{ action }}" class="card">
   <label>{{ t('drawn_at') }} ({{ t('required') }})
-    <input type="datetime-local" name="drawn_at" required
-      value="{{ drawn_at_value }}">
+    <input type="date" name="drawn_at" required value="{{ drawn_at_value }}">
   </label>
   <label>{{ t('lab_name') }} ({{ t('required') }})
     <input type="text" name="lab_name" required value="{{ draw.lab_name if draw else '' }}">

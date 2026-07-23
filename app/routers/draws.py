@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -33,6 +33,16 @@ def _parse_int(value: str | None) -> int | None:
     if value is None or value == "":
         return None
     return int(value)
+
+
+def _parse_drawn_at(raw: str) -> datetime:
+    """Accept date-only (YYYY-MM-DD) or datetime-local; store as midnight when no time."""
+    value = (raw or "").strip()
+    if not value:
+        raise ValueError("drawn_at required")
+    if "T" in value:
+        return datetime.fromisoformat(value)
+    return datetime.combine(date.fromisoformat(value), datetime.min.time())
 
 
 def _get_owned_draw(db, user_id: int, draw_id: int) -> BloodDraw | None:
@@ -80,6 +90,7 @@ def _display_results(draw: BloodDraw, locale: str):
                 lab_ref_high=r.lab_ref_high,
                 tip_low=tip_low,
                 tip_high=tip_high,
+                notes=r.notes,
             )
         )
     return rows
@@ -119,7 +130,7 @@ def new_draw_form(request: Request, locale: LocaleDep, user: UserDep):
 @router.post("/new")
 async def create_draw(request: Request, db: DbDep, user: UserDep):
     form = dict(await request.form())
-    drawn_at = datetime.fromisoformat(form["drawn_at"])
+    drawn_at = _parse_drawn_at(form["drawn_at"])
     lab_name = (form.get("lab_name") or "").strip()
     if not lab_name:
         return redirect("/draws/new")
@@ -161,7 +172,7 @@ def edit_draw_form(request: Request, db: DbDep, locale: LocaleDep, user: UserDep
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    drawn_at_value = draw.drawn_at.strftime("%Y-%m-%dT%H:%M")
+    drawn_at_value = draw.drawn_at.strftime("%Y-%m-%d")
     return templates.TemplateResponse(
         request,
         "draws/form.html",
@@ -182,7 +193,7 @@ async def edit_draw(request: Request, db: DbDep, user: UserDep, draw_id: int):
     if not draw:
         return redirect("/draws")
     form = dict(await request.form())
-    draw.drawn_at = datetime.fromisoformat(form["drawn_at"])
+    draw.drawn_at = _parse_drawn_at(form["drawn_at"])
     draw.lab_name = (form.get("lab_name") or "").strip()
     draw.workplace = (form.get("workplace") or "").strip() or None
     conditions = _apply_conditions(draw, form)
@@ -276,6 +287,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             "unit": r.unit,
             "lab_ref_low": r.lab_ref_low,
             "lab_ref_high": r.lab_ref_high,
+            "notes": r.notes or "",
             "id": r.id,
             "marker_code": r.marker_code,
         }
@@ -310,6 +322,8 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
         high = form.get(f"high_{idx}")
         row.lab_ref_low = float(low) if low else None
         row.lab_ref_high = float(high) if high else None
+        note = (form.get(f"notes_{idx}") or "").strip()
+        row.notes = note or None
         matched = match_marker(row.label or "", catalog)
         if matched:
             row.marker_code = matched.code
@@ -350,6 +364,7 @@ def add_result(
     unit: str = Form(""),
     lab_ref_low: str = Form(""),
     lab_ref_high: str = Form(""),
+    notes: str = Form(""),
 ):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
@@ -376,6 +391,7 @@ def add_result(
     else:
         return redirect(f"/draws/{draw_id}")
 
+    note = notes.strip() or None
     db.add(
         ResultValue(
             blood_draw_id=draw.id,
@@ -387,9 +403,28 @@ def add_result(
             lab_ref_high=_parse_float(lab_ref_high),
             confirmed=True,
             label=label,
+            notes=note,
         )
     )
     db.commit()
+    return redirect(f"/draws/{draw_id}")
+
+
+@router.post("/{draw_id}/results/{result_id}/notes")
+def update_result_notes(
+    db: DbDep,
+    user: UserDep,
+    draw_id: int,
+    result_id: int,
+    notes: str = Form(""),
+):
+    draw = _get_owned_draw(db, user.id, draw_id)
+    if not draw:
+        return redirect("/draws")
+    row = db.get(ResultValue, result_id)
+    if row and row.blood_draw_id == draw.id:
+        row.notes = notes.strip() or None
+        db.commit()
     return redirect(f"/draws/{draw_id}")
 
 

@@ -12,7 +12,7 @@
     {% for d in draws %}
       <li>
         <a href="/draws/{{ d.id }}">
-          <strong>{{ d.drawn_at.strftime('%Y-%m-%d %H:%M') }}</strong>
+          <strong>{{ d.drawn_at.strftime('%Y-%m-%d') }}</strong>
           — {{ d.lab_name }}
         </a>
       </li>
