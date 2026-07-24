@@ -46,19 +46,16 @@ def _store_upload(file: UploadFile, dest_dir: Path) -> tuple[str, str, str]:
         shutil.copyfileobj(file.file, out)
 
     if suffix in {".heic", ".heif"}:
-        try:
-            from pillow_heif import register_heif_opener
+        from pillow_heif import register_heif_opener
 
-            register_heif_opener()
-            img = Image.open(dest)
-            jpeg_path = dest.with_suffix(".jpg")
-            img.convert("RGB").save(jpeg_path, "JPEG", quality=90)
-            dest.unlink(missing_ok=True)
-            dest = jpeg_path
-            content_type = "image/jpeg"
-            stored_name = jpeg_path.name
-        except Exception:
-            pass
+        register_heif_opener()
+        img = Image.open(dest)
+        jpeg_path = dest.with_suffix(".jpg")
+        img.convert("RGB").save(jpeg_path, "JPEG", quality=92)
+        dest.unlink(missing_ok=True)
+        dest = jpeg_path
+        content_type = "image/jpeg"
+        stored_name = jpeg_path.name
 
     return stored_name, content_type, str(dest)
 

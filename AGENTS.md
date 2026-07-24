@@ -40,7 +40,13 @@ Persistence on VPS: DB `/vps/data/lab_diary_db`, uploads `/vps/data/lab_diary_up
 
 ## Multi-date reports
 
-Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). Prefer classic multi-date table parse when it finds **more** dates than Smart. Smart: discover column dates first, then extract; do not collapse columns into one draw.
+Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). Prefer classic multi-date table parse when it finds **more** dates than Smart.
+
+Smart extract:
+- Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).
+- Date discovery must classify `single` vs `multi_column`; never force consecutive calendar-day spam.
+- Discard / retry when output looks hallucinated (one marker, many dates, all zeros); fall back to classic.
+- EHR screenshots (PC DOKTOR): single draw, extract **all** visible analytes.
 
 ## Marker catalog
 

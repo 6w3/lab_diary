@@ -7,6 +7,7 @@ import json
 import logging
 import mimetypes
 import re
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,16 +26,16 @@ Return ONLY valid JSON (no markdown) with this shape:
   "draws": [
     {
       "drawn_on": "YYYY-MM-DD",
-      "lab_name": "Oblastní nemocnice Příbram",
+      "lab_name": "string or null",
       "results": [
         {
-          "marker_code": "ferritin",
-          "label": "Feritin",
-          "value": 0.0,
-          "unit": "ug/l",
-          "ref_low": null,
-          "ref_high": null,
-          "confidence": 0.0
+          "marker_code": "catalog_code_or_omit",
+          "label": "exact analyte name from the report",
+          "value": 123.4,
+          "unit": "unit from report",
+          "ref_low": 1.0,
+          "ref_high": 2.0,
+          "confidence": 0.9
         }
       ]
     }
@@ -42,18 +43,44 @@ Return ONLY valid JSON (no markdown) with this shape:
   "warnings": []
 }
 Rules:
-- Czech/English laboratory blood report.
-- Set lab_name from the report header (hospital / lab name), e.g. "Oblastní nemocnice Příbram" or "Laboratoř OKB". Prefer the clearest institution name visible at the top. Same lab_name on every draws[] entry when it is one report.
-- If multiple draw dates/columns exist, emit one object per date in "draws".
-- CRITICAL for comparison tables: when a header row has several dates (e.g. 14. 10. 2020 10:30 | 18. 5. 2016 12:15 | 14. 9. 2010 7:30), create ONE draws[] entry PER date column. Put each marker's value from that column into that draw. Do NOT collapse all columns into a single draw.
-- Czech dates often have spaces after dots: "14. 10. 2020" means 14 October 2020.
-- Typical Czech hospital "historické výsledky" layout: leftmost column = analyte name, then one numeric column per draw date, then reference range, then unit.
-- Dates on Czech lab reports are day-first: D.M.YYYY or DD.MM.YYYY (example: 12.01.2025 = 12 January 2025 = 2025-01-12). Never treat them as US month-first.
+- Czech/English laboratory blood report OR EHR screenshot (e.g. PC DOKTOR) showing lab results.
+- Read ONLY what is visible. NEVER invent analytes, values, or dates. NEVER copy example JSON fields.
+- The schema numbers/names above are PLACEHOLDERS only — replace them with real rows from the image.
+- Set lab_name from the report/EHR header when visible (hospital / lab / clinic). Same lab_name on every draws[] entry when it is one report.
+- Prefer the sample collection date ("Datum odběru") over visit/print timestamps.
+- If this is a SINGLE visit / single result list (typical EHR screen), emit ONE draws[] object with ALL visible numeric lab rows.
+- If a comparison table has several DATE COLUMNS in the header, emit one draws[] entry PER date column. Put each marker's value from that column into that draw. Do NOT collapse columns into a single draw.
+- Czech dates are day-first: D.M.YYYY or DD.MM.YYYY (12.01.2025 = 2025-01-12). Spaces after dots are common ("14. 10. 2020").
 - Prefer ISO dates YYYY-MM-DD in output.
-- Numbers as JSON numbers (dot decimal). Do not invent values you cannot read.
-- When a known catalog code matches, set marker_code exactly (e.g. hgb, ferritin, vitamin_d, tsh, glucose). Otherwise omit marker_code and keep the original label.
+- Numbers as JSON numbers (dot decimal). Values like ">1.50" → 1.50 and note in warnings if needed.
+- Skip non-lab rows (ano/ne flags, comments, diagnoses, prescriptions, vitals like TK/P/weight unless they are lab analytes).
+- When a known catalog code matches, set marker_code exactly (e.g. hgb, glucose, creatinine, alt, ggt, wbc, plt). Otherwise omit marker_code and keep the original label.
 - Keep original units from the report; do not invent conversions.
-- If you see more than one draw date, warnings may list them, but every date with values MUST still appear as its own draws[] object with results.
+- Extract EVERY visible lab analyte row (biochemistry + hematology), not just one marker.
+"""
+
+DATE_DISCOVER_HINT = """
+Return ONLY valid JSON (no markdown):
+{"layout": "single"|"multi_column"|"unknown", "dates": ["YYYY-MM-DD"], "notes": ""}
+Task: find draw/sample dates on this Czech lab report or EHR screenshot.
+
+layout:
+- "multi_column" ONLY if there is a historical comparison TABLE with several DATE COLUMNS as headers (each column = another draw).
+- "single" if this is one visit / one result list (PC DOKTOR, single panel, one "Datum odběru").
+- "unknown" if unclear.
+
+dates:
+- For multi_column: list EVERY result-column header date (ISO YYYY-MM-DD).
+- For single: list at most ONE preferred sample date ("Datum odběru"), else the lab result date. Do NOT list every calendar day.
+- Czech dates are day-first; spaces after dots are OK.
+- Do NOT invent dates. Do NOT expand into a consecutive day range.
+- IGNORE: birth dates / rodné číslo, appointment notes, diagnoses, prescription dates, unrelated visit notes below the lab panel.
+"""
+
+SINGLE_DRAW_HINT = """
+This image is a SINGLE-DRAW lab panel / EHR screenshot (not a multi-column history table).
+Return ONE draws[] object only. Include ALL visible numeric lab analytes (biochem + hematology).
+Do not invent ferritin or any marker that is not printed. Do not invent extra dates.
 """
 
 
@@ -101,11 +128,22 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
             try:
                 value = float(r["value"])
             except (KeyError, TypeError, ValueError):
-                continue
+                # Try stripping comparison prefixes like ">1.50"
+                raw_v = str(r.get("value") or "").strip().replace(",", ".")
+                raw_v = re.sub(r"^[<>]=?\s*", "", raw_v)
+                try:
+                    value = float(raw_v)
+                except (TypeError, ValueError):
+                    continue
             label = str(r.get("label") or "").strip()
             if len(label) < 2:
                 continue
             marker_code = str(r.get("marker_code") or "").strip() or None
+            # Guard: placeholder/example echo
+            if marker_code == "catalog_code_or_omit":
+                marker_code = None
+            if label.lower() in {"exact analyte name from the report", "string or null"}:
+                continue
             ref_low = r.get("ref_low", r.get("lab_ref_low"))
             ref_high = r.get("ref_high", r.get("lab_ref_high"))
             try:
@@ -143,15 +181,83 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
     return {"draws": draws_out, "warnings": list(data.get("warnings") or [])}
 
 
-DATE_DISCOVER_HINT = """
-Return ONLY valid JSON (no markdown):
-{"dates": ["YYYY-MM-DD"], "notes": ""}
-Task: list EVERY draw/result COLUMN HEADER date on this Czech lab report.
-Historical comparison tables have multiple date columns, e.g. "14. 10. 2020 10:30", "18. 5. 2016 12:15", "14. 9. 2010 7:30".
-Czech dates are day-first and often have spaces after dots.
-Convert each to ISO YYYY-MM-DD.
-Include all result-column dates. Do not invent dates. Ignore rodné číslo / birth embedded in ID.
-"""
+def _is_consecutive_day_run(dates: list[str], *, min_len: int = 5) -> bool:
+    """True when dates contain a long consecutive calendar-day streak (hallucination smell)."""
+    parsed: list[date] = []
+    for raw in dates:
+        try:
+            parsed.append(date.fromisoformat(raw[:10]))
+        except ValueError:
+            continue
+    if len(parsed) < min_len:
+        return False
+    parsed = sorted(set(parsed))
+    run = 1
+    best = 1
+    for i in range(1, len(parsed)):
+        if parsed[i] - parsed[i - 1] == timedelta(days=1):
+            run += 1
+            best = max(best, run)
+        else:
+            run = 1
+    return best >= min_len
+
+
+def looks_like_hallucinated_extract(proposals: list[dict]) -> bool:
+    """Detect classic VLM failure: one marker/zero values repeated across many invented dates."""
+    if not proposals:
+        return True
+    dates = sorted(
+        {
+            str(p.get("proposed_drawn_on") or "").strip()[:10]
+            for p in proposals
+            if str(p.get("proposed_drawn_on") or "").strip()
+        }
+    )
+    analytes: set[str] = set()
+    for p in proposals:
+        code = str(p.get("marker_code") or "").strip().lower()
+        label = str(p.get("label") or "").strip().lower()
+        key = code or label
+        if key:
+            analytes.add(key)
+    values = [p.get("value") for p in proposals]
+    all_zero = values and all(
+        isinstance(v, (int, float)) and abs(float(v)) < 1e-12 for v in values
+    )
+    few_analytes = len(analytes) <= 1
+    many_dates = len(dates) >= 5
+    if many_dates and few_analytes:
+        return True
+    if _is_consecutive_day_run(dates) and few_analytes:
+        return True
+    if all_zero and few_analytes and len(proposals) >= 3:
+        return True
+    return False
+
+
+def _sanitize_discovered_dates(
+    dates: list[str],
+    *,
+    layout: str,
+) -> list[str]:
+    """Drop invented date spam; keep multi-column headers or a single sample date."""
+    clean: list[str] = []
+    for raw in dates:
+        iso = _normalize_drawn_on(str(raw))
+        if iso and iso not in clean:
+            clean.append(iso)
+    if layout == "single":
+        return clean[:1]
+    if layout != "multi_column":
+        # Unknown layout: never force a consecutive day run into extraction
+        if _is_consecutive_day_run(clean) or len(clean) > 8:
+            return []
+        return clean[:3]
+    # multi_column: still reject absurd consecutive calendars (not real lab columns)
+    if _is_consecutive_day_run(clean):
+        return []
+    return clean
 
 
 def _pages_as_jpeg_paths(storage_path: str, tmp_dir: Path) -> list[Path]:
@@ -166,6 +272,14 @@ def _pages_as_jpeg_paths(storage_path: str, tmp_dir: Path) -> list[Path]:
             _save_vision_jpeg(img.convert("RGB"), dest)
             out.append(dest)
         return out
+    # HEIC may still be present if conversion failed at upload; register opener
+    if path.suffix.lower() in {".heic", ".heif"}:
+        try:
+            from pillow_heif import register_heif_opener
+
+            register_heif_opener()
+        except Exception:  # noqa: BLE001
+            pass
     img = Image.open(path).convert("RGB")
     dest = tmp_dir / "page_0.jpg"
     _save_vision_jpeg(img, dest)
@@ -213,16 +327,76 @@ def _image_content(pages: list[Path]) -> list[dict]:
     return parts
 
 
-def _discover_dates(pages: list[Path]) -> list[str]:
+def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
     content: list[dict] = [{"type": "text", "text": DATE_DISCOVER_HINT}, *_image_content(pages)]
     text = _nvidia_chat(content, max_tokens=512)
     data = _extract_json(text)
-    dates: list[str] = []
-    for raw in data.get("dates") or []:
-        iso = _normalize_drawn_on(str(raw))
-        if iso and iso not in dates:
-            dates.append(iso)
-    return dates
+    layout = str(data.get("layout") or "unknown").strip().lower()
+    if layout not in {"single", "multi_column", "unknown"}:
+        layout = "unknown"
+    dates = _sanitize_discovered_dates(list(data.get("dates") or []), layout=layout)
+    return layout, dates
+
+
+def _flatten_draws(parsed: dict[str, Any]) -> list[dict]:
+    proposals: list[dict] = []
+    for d in parsed.get("draws") or []:
+        proposals.extend(d.get("results") or [])
+    return proposals
+
+
+def _build_extract_content(
+    pages: list[Path],
+    *,
+    marker_hints: list[str] | None,
+    layout: str,
+    discovered: list[str],
+    force_single: bool = False,
+) -> list[dict]:
+    content: list[dict] = [{"type": "text", "text": SMART_SCHEMA_HINT}]
+    if force_single or layout == "single":
+        content.append({"type": "text", "text": SINGLE_DRAW_HINT})
+        if discovered:
+            content.append(
+                {
+                    "type": "text",
+                    "text": f"Preferred sample date (Datum odběru) if visible: {discovered[0]}.",
+                }
+            )
+    elif layout == "multi_column" and discovered:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    "REQUIRED: emit one draws[] object for EACH of these COLUMN header dates "
+                    f"(do not omit any): {', '.join(discovered)}. "
+                    "Each marker row has one value per date column — put the correct column value "
+                    "into the matching draw. Do not invent extra dates beyond this list."
+                ),
+            }
+        )
+    elif discovered:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    "Possible draw date(s) seen on the page: "
+                    f"{', '.join(discovered)}. Use only dates that actually have lab values."
+                ),
+            }
+        )
+    if marker_hints:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    "Catalog marker codes (use marker_code when matching): "
+                    + ", ".join(marker_hints[:120])
+                ),
+            }
+        )
+    content.extend(_image_content(pages))
+    return content
 
 
 def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) -> tuple[str, list[dict], dict]:
@@ -239,49 +413,36 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
         if not pages:
             raise RuntimeError("No pages to analyze")
 
+        layout = "unknown"
         discovered: list[str] = []
         try:
-            discovered = _discover_dates(pages)
+            layout, discovered = _discover_dates(pages)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Date discovery failed: %s", exc)
 
-        content: list[dict] = [{"type": "text", "text": SMART_SCHEMA_HINT}]
-        if discovered:
-            content.append(
-                {
-                    "type": "text",
-                    "text": (
-                        "REQUIRED: emit one draws[] object for EACH of these column dates "
-                        f"(do not omit any): {', '.join(discovered)}. "
-                        "Each marker row has one value per date column — put the correct column value "
-                        "into the matching draw."
-                    ),
-                }
-            )
-        if marker_hints:
-            content.append(
-                {
-                    "type": "text",
-                    "text": (
-                        "Catalog marker codes (use marker_code when matching): "
-                        + ", ".join(marker_hints[:120])
-                    ),
-                }
-            )
-        content.extend(_image_content(pages))
-
+        content = _build_extract_content(
+            pages,
+            marker_hints=marker_hints,
+            layout=layout,
+            discovered=discovered,
+        )
         text = _nvidia_chat(content, max_tokens=8192)
         parsed = _validate_smart_payload(_extract_json(text))
-        proposals: list[dict] = []
-        for d in parsed["draws"]:
-            proposals.extend(d["results"])
+        proposals = _flatten_draws(parsed)
 
         got_dates = sorted({p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")})
-        # If discovery found more dates than extract returned, retry once with a louder reminder
+
+        # Multi-column: retry if discovery dates missing from extract
         missing = [d for d in discovered if d not in got_dates]
-        if missing and discovered:
-            content_retry: list[dict] = [
-                {"type": "text", "text": SMART_SCHEMA_HINT},
+        if layout == "multi_column" and missing and discovered:
+            content_retry = _build_extract_content(
+                pages,
+                marker_hints=marker_hints,
+                layout=layout,
+                discovered=discovered,
+            )
+            content_retry.insert(
+                1,
                 {
                     "type": "text",
                     "text": (
@@ -290,20 +451,61 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
                         "Copy values from each date column separately."
                     ),
                 },
-                *_image_content(pages),
-            ]
+            )
             try:
                 text2 = _nvidia_chat(content_retry, max_tokens=8192)
                 parsed2 = _validate_smart_payload(_extract_json(text2))
-                props2: list[dict] = []
-                for d in parsed2["draws"]:
-                    props2.extend(d["results"])
+                props2 = _flatten_draws(parsed2)
                 got2 = {p.get("proposed_drawn_on") for p in props2 if p.get("proposed_drawn_on")}
                 if len(got2) > len(got_dates):
                     text, proposals, parsed = text2, props2, parsed2
                     got_dates = sorted(got2)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Smart multi-date retry failed: %s", exc)
+
+        # Hallucination guard: one marker / zero values / date spam → single-draw retry
+        if looks_like_hallucinated_extract(proposals):
+            logger.warning(
+                "Smart extract looks hallucinated (layout=%s dates=%s n=%s); retrying single-draw",
+                layout,
+                got_dates,
+                len(proposals),
+            )
+            try:
+                content_single = _build_extract_content(
+                    pages,
+                    marker_hints=marker_hints,
+                    layout="single",
+                    discovered=discovered[:1],
+                    force_single=True,
+                )
+                text3 = _nvidia_chat(content_single, max_tokens=8192)
+                parsed3 = _validate_smart_payload(_extract_json(text3))
+                props3 = _flatten_draws(parsed3)
+                if props3 and not looks_like_hallucinated_extract(props3):
+                    text, proposals, parsed = text3, props3, parsed3
+                    got_dates = sorted(
+                        {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
+                    )
+                    layout = "single_retry"
+                elif props3 and len({str(p.get("label") or "").lower() for p in props3}) > len(
+                    {str(p.get("label") or "").lower() for p in proposals}
+                ):
+                    # Prefer richer analyte set even if still imperfect
+                    text, proposals, parsed = text3, props3, parsed3
+                    got_dates = sorted(
+                        {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
+                    )
+                    layout = "single_retry"
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Smart single-draw retry failed: %s", exc)
+
+        # Still garbage → return empty rather than ferritin spam (classic fallback can take over)
+        if looks_like_hallucinated_extract(proposals):
+            logger.error("Smart extract still hallucinated; returning empty for classic fallback")
+            proposals = []
+            parsed = {"draws": [], "warnings": ["hallucinated_extract_discarded"]}
+            got_dates = []
 
         model = settings.smart_model or "nvidia/nemotron-nano-12b-v2-vl"
         lab_name = None
@@ -315,6 +517,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
             "engine": "nvidia",
             "model": model,
             "mode": "smart",
+            "layout": layout,
             "dates": got_dates,
             "discovered_dates": discovered,
             "lab_name": lab_name,
