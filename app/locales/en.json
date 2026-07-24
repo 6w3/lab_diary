@@ -75,5 +75,7 @@
   "extract_smart": "Smart AI (NVIDIA — understands photos/tables)",
   "smart_consent": "I agree to send this report to NVIDIA NIM for analysis",
   "multi_date_hint": "Multiple draw dates detected. Confirming will create separate draws per date.",
+  "detected_dates": "Detected dates",
+  "single_date_hint": "Draw date",
   "health": "OK"
 }

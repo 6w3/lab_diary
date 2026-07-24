@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, ImportJob, Marker, ResultValue
 from app.services.markers import match_marker
+from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
@@ -154,13 +155,31 @@ async def import_upload(
     try:
         if mode == "smart":
             raw, proposals, _meta = run_smart_extract(storage_path, marker_hints=marker_hints)
+            proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
+            _meta = {**(_meta or {}), **merge_meta}
         else:
             raw, proposals, _meta = extract_document(storage_path)
+        # Stable order: date then label
+        proposals = sorted(
+            proposals,
+            key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
+        )
         enriched = _enrich_proposals(proposals, catalog)
-        default_lab = (lab_name or "").strip() or "Laboratoř"
+        detected_dates = unique_drawn_dates(enriched)
+        detected_lab = ((_meta or {}).get("lab_name") or "").strip()
+        default_lab = (lab_name or "").strip() or detected_lab or "Laboratoř"
         job.ocr_raw_text = raw
         job.proposals_json = json.dumps(
-            {"lab_name": default_lab, "proposals": enriched},
+            {
+                "lab_name": default_lab,
+                "proposals": enriched,
+                "detected_dates": detected_dates,
+                "extract_meta": {
+                    "source": (_meta or {}).get("source") or mode,
+                    "dates": detected_dates,
+                    "lab_name": detected_lab or None,
+                },
+            },
             ensure_ascii=False,
         )
         job.status = "review"
@@ -193,6 +212,16 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         return redirect("/draws")
     payload = json.loads(job.proposals_json or "{}")
     proposals = payload.get("proposals") or []
+    detected_dates = payload.get("detected_dates") or unique_drawn_dates(proposals)
+    multi_date = len(detected_dates) > 1
+    # Group for template
+    groups: list[dict] = []
+    by_date: dict[str, list] = {}
+    for p in proposals:
+        d = p.get("proposed_drawn_on") or ""
+        by_date.setdefault(d, []).append(p)
+    for d in sorted(by_date.keys(), key=lambda x: x or "9999"):
+        groups.append({"date": d, "rows": by_date[d]})
     return templates.TemplateResponse(
         request,
         "import/review.html",
@@ -201,8 +230,11 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             locale,
             job=job,
             proposals=proposals,
+            groups=groups,
             lab_name=payload.get("lab_name") or "Laboratoř",
             unit_choices=UNIT_CHOICES,
+            detected_dates=detected_dates,
+            multi_date=multi_date,
         ),
     )
 

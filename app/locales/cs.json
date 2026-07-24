@@ -75,5 +75,7 @@
   "extract_smart": "Smart AI (NVIDIA — rozumí fotkám/tabulkám)",
   "smart_consent": "Souhlasím s odesláním reportu na NVIDIA NIM k analýze",
   "multi_date_hint": "Detekováno více dat odběru. Po potvrzení se vytvoří samostatné odběry podle data.",
+  "detected_dates": "Nalezená data",
+  "single_date_hint": "Datum odběru",
   "health": "OK"
 }

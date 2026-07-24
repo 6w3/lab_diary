@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
 from app.services.markers import match_marker
+from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
@@ -274,6 +275,7 @@ async def upload_files(
         try:
             if mode == "smart":
                 raw, proposals, _meta = run_smart_extract(storage_path, marker_hints=marker_hints)
+                proposals, raw, _merge = prefer_multi_date_proposals(storage_path, proposals, raw)
             else:
                 raw, proposals, _meta = extract_document(storage_path)
             att.ocr_raw_text = raw
@@ -354,7 +356,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
                 "proposed_drawn_on": r.proposed_drawn_on.strftime("%Y-%m-%d") if r.proposed_drawn_on else "",
             }
         )
-    multi_date = any(p["proposed_drawn_on"] for p in proposals)
+    multi_date = len(unique_drawn_dates(proposals)) > 1
     return templates.TemplateResponse(
         request,
         "draws/ocr_review.html",
@@ -365,6 +367,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             attachment=att,
             proposals=proposals,
             multi_date=multi_date,
+            detected_dates=unique_drawn_dates(proposals),
             unit_choices=UNIT_CHOICES,
             default_date=draw.drawn_at.strftime("%Y-%m-%d") if draw.drawn_at else "",
         ),
