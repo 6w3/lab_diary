@@ -3,13 +3,14 @@
 {% block content %}
 <h1>{{ t('upload_report') }}</h1>
 <p class="muted">{{ t('upload_first_hint') }}</p>
-<form method="post" action="/import" enctype="multipart/form-data" class="card">
+<form method="post" action="/import" enctype="multipart/form-data" class="card" id="import-upload-form">
   <label>{{ t('lab_name') }}
     <input type="text" name="lab_name" placeholder="{{ t('optional') }}">
   </label>
   <label>{{ t('upload') }}
     <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
   </label>
+  <p class="muted">{{ t('upload_batch_hint') }}</p>
   <fieldset class="extract-mode">
     <legend>{{ t('extract_mode') }}</legend>
     {% if smart_available %}
@@ -27,4 +28,23 @@
   <button type="submit">{{ t('read_report') }}</button>
 </form>
 <p><a href="/draws/new">{{ t('manual_entry') }}</a></p>
+
+<div class="upload-overlay" id="upload-overlay" hidden>
+  <div class="upload-overlay-card">
+    <div class="spinner" aria-hidden="true"></div>
+    <p>{{ t('import_progress_uploading') }}</p>
+  </div>
+</div>
+<script>
+(function () {
+  const form = document.getElementById("import-upload-form");
+  const overlay = document.getElementById("upload-overlay");
+  if (!form || !overlay) return;
+  form.addEventListener("submit", function () {
+    overlay.hidden = false;
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+  });
+})();
+</script>
 {% endblock %}

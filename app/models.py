@@ -107,7 +107,7 @@ class ImportJob(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    status: Mapped[str] = mapped_column(String(32), default="review")  # review|confirmed|failed|cancelled
+    status: Mapped[str] = mapped_column(String(32), default="review")  # processing|review|confirmed|failed|cancelled
     extract_mode: Mapped[str] = mapped_column(String(32), default="smart")
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(128))

@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
@@ -151,6 +151,95 @@ def import_form(request: Request, locale: LocaleDep, user: UserDep):
     )
 
 
+def _job_payload(job: ImportJob) -> dict:
+    try:
+        return json.loads(job.proposals_json or "{}")
+    except json.JSONDecodeError:
+        return {}
+
+
+def _save_job_payload(job: ImportJob, payload: dict) -> None:
+    job.proposals_json = json.dumps(payload, ensure_ascii=False)
+
+
+def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
+    from app.i18n import t as i18n_t
+
+    atts = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .order_by(Attachment.id)
+        .all()
+    )
+    total = len(atts)
+    done = sum(1 for a in atts if a.ocr_status in {"done", "failed", "skipped"})
+    current = next((a for a in atts if a.ocr_status == "processing"), None)
+    if current is None:
+        current = next((a for a in atts if a.ocr_status == "pending"), None)
+    filename = current.filename if current else ""
+    if job.status == "review":
+        message = i18n_t(locale, "import_progress_done")
+    elif job.status == "failed":
+        message = i18n_t(locale, "import_progress_failed")
+    elif current:
+        message = i18n_t(
+            locale,
+            "import_progress_file",
+            current=str(min(done + 1, total) if total else 0),
+            total=str(total),
+            filename=filename,
+        )
+    else:
+        message = i18n_t(locale, "import_progress_recognizing")
+    return {
+        "status": job.status,
+        "done": done,
+        "total": total,
+        "percent": int(round(100 * done / total)) if total else 0,
+        "current_file": filename,
+        "message": message,
+        "review_url": f"/import/{job.id}/review" if job.status == "review" else None,
+        "error": job.ocr_raw_text if job.status == "failed" else None,
+    }
+
+
+def _finalize_job(db, job: ImportJob) -> None:
+    from app.services.proposal_filter import filter_proposals
+
+    payload = _job_payload(job)
+    catalog = db.query(Marker).all()
+    user_aliases = load_user_aliases(db, job.user_id)
+    all_proposals = filter_proposals(list(payload.get("proposals") or []))
+    all_proposals = sorted(
+        all_proposals,
+        key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
+    )
+    enriched = _enrich_proposals(all_proposals, catalog, user_aliases=user_aliases)
+    enriched = filter_proposals(enriched)
+    detected_dates = unique_drawn_dates(enriched)
+    detected_lab = (payload.get("detected_lab") or "").strip()
+    form_lab = (payload.get("lab_name_form") or "").strip()
+    default_lab = form_lab or detected_lab or "Laboratoř"
+    raw_parts = payload.get("raw_parts") or []
+    job.ocr_raw_text = "\n\n".join(raw_parts) if raw_parts else job.ocr_raw_text
+    atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
+    _save_job_payload(
+        job,
+        {
+            "lab_name": default_lab,
+            "proposals": enriched,
+            "detected_dates": detected_dates,
+            "extract_meta": {
+                "source": job.extract_mode,
+                "dates": detected_dates,
+                "lab_name": detected_lab or None,
+                "file_count": len(atts),
+            },
+        },
+    )
+    job.status = "review"
+
+
 @router.post("")
 async def import_upload(
     request: Request,
@@ -175,7 +264,7 @@ async def import_upload(
     first = uploads[0]
     job = ImportJob(
         user_id=user.id,
-        status="pending",
+        status="processing",
         extract_mode=mode,
         filename=first.filename or "upload.bin",
         content_type=first.content_type or "application/octet-stream",
@@ -184,52 +273,28 @@ async def import_upload(
     db.add(job)
     db.flush()
 
-    catalog = db.query(Marker).all()
-    marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
-    user_aliases = load_user_aliases(db, user.id)
-
-    all_proposals: list[dict] = []
-    raw_parts: list[str] = []
-    detected_lab = ""
     saved_any = False
-
-    try:
-        for file in uploads:
-            try:
-                filename, content_type, storage_path = save_import_upload(file, user.id, job.id)
-            except ValueError:
-                continue
-            if not saved_any:
-                job.filename = filename
-                job.content_type = content_type
-                job.storage_path = storage_path
-                saved_any = True
-            raw, proposals, meta = _extract_file(storage_path, mode, marker_hints)
-            att = Attachment(
+    for file in uploads:
+        try:
+            filename, content_type, storage_path = save_import_upload(file, user.id, job.id)
+        except ValueError:
+            continue
+        if not saved_any:
+            job.filename = filename
+            job.content_type = content_type
+            job.storage_path = storage_path
+            saved_any = True
+        db.add(
+            Attachment(
                 blood_draw_id=None,
                 import_job_id=job.id,
                 filename=filename,
                 content_type=content_type,
                 storage_path=storage_path,
-                ocr_status="done",
-                ocr_raw_text=raw,
+                ocr_status="pending",
+                ocr_raw_text=None,
             )
-            db.add(att)
-            db.flush()
-            for p in proposals:
-                p = dict(p)
-                p["attachment_id"] = att.id
-                all_proposals.append(p)
-            raw_parts.append(f"--- {filename} ---\n{raw or ''}")
-            lab = ((meta or {}).get("lab_name") or "").strip()
-            if lab and not detected_lab:
-                detected_lab = lab
-    except Exception as exc:  # noqa: BLE001
-        job.status = "failed"
-        job.ocr_raw_text = str(exc)
-        db.commit()
-        request.session["flash"] = f"Čtení reportu selhalo ({exc}). Zkus Classic režim."
-        return redirect("/import")
+        )
 
     if not saved_any:
         db.delete(job)
@@ -237,31 +302,153 @@ async def import_upload(
         request.session["flash"] = "Nepodporovaný typ souboru."
         return redirect("/import")
 
-    all_proposals = sorted(
-        all_proposals,
-        key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
-    )
-    enriched = _enrich_proposals(all_proposals, catalog, user_aliases=user_aliases)
-    detected_dates = unique_drawn_dates(enriched)
-    default_lab = (lab_name or "").strip() or detected_lab or "Laboratoř"
-    job.ocr_raw_text = "\n\n".join(raw_parts)
-    job.proposals_json = json.dumps(
+    _save_job_payload(
+        job,
         {
-            "lab_name": default_lab,
-            "proposals": enriched,
-            "detected_dates": detected_dates,
-            "extract_meta": {
-                "source": mode,
-                "dates": detected_dates,
-                "lab_name": detected_lab or None,
-                "file_count": len(uploads),
-            },
+            "lab_name_form": (lab_name or "").strip(),
+            "detected_lab": "",
+            "proposals": [],
+            "raw_parts": [],
         },
-        ensure_ascii=False,
     )
-    job.status = "review"
     db.commit()
-    return redirect(f"/import/{job.id}/review")
+    return redirect(f"/import/{job.id}/progress")
+
+
+@router.get("/{job_id}/progress", response_class=HTMLResponse)
+def import_progress(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id:
+        return redirect("/import")
+    if job.status == "review":
+        return redirect(f"/import/{job.id}/review")
+    if job.status not in {"processing", "failed"}:
+        return redirect("/import")
+    return templates.TemplateResponse(
+        request,
+        "import/progress.html",
+        template_context(
+            request,
+            locale,
+            job=job,
+            progress=_progress_dict(job, db, locale=locale),
+        ),
+    )
+
+
+@router.get("/{job_id}/progress.json")
+def import_progress_json(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id:
+        return JSONResponse({"status": "failed", "error": "not_found"}, status_code=404)
+    return JSONResponse(_progress_dict(job, db, locale=locale))
+
+
+@router.post("/{job_id}/process-step")
+def import_process_step(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id:
+        return JSONResponse({"status": "failed", "error": "not_found"}, status_code=404)
+    if job.status == "review":
+        return JSONResponse(_progress_dict(job, db, locale=locale))
+    if job.status == "failed":
+        return JSONResponse(_progress_dict(job, db, locale=locale))
+    if job.status != "processing":
+        return JSONResponse({"status": "failed", "error": "bad_state"}, status_code=400)
+
+    att = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id, Attachment.ocr_status == "pending")
+        .order_by(Attachment.id)
+        .with_for_update()
+        .first()
+    )
+    if att is None:
+        active = (
+            db.query(Attachment)
+            .filter(
+                Attachment.import_job_id == job.id,
+                Attachment.ocr_status.in_(("pending", "processing")),
+            )
+            .count()
+        )
+        if active == 0:
+            _finalize_job(db, job)
+            db.commit()
+        return JSONResponse(_progress_dict(job, db, locale=locale))
+
+    att.ocr_status = "processing"
+    att_id = att.id
+    storage_path = att.storage_path
+    filename = att.filename
+    mode = job.extract_mode
+    db.commit()
+
+    catalog = db.query(Marker).all()
+    marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
+    try:
+        raw, proposals, meta = _extract_file(storage_path, mode, marker_hints)
+    except Exception as exc:  # noqa: BLE001
+        att = db.get(Attachment, att_id)
+        job = db.get(ImportJob, job_id)
+        if att:
+            att.ocr_status = "failed"
+            att.ocr_raw_text = str(exc)
+        if job:
+            job.status = "failed"
+            job.ocr_raw_text = str(exc)
+        db.commit()
+        return JSONResponse(_progress_dict(job, db, locale=locale))
+
+    # Merge under row lock so parallel workers do not clobber proposals_json
+    job = (
+        db.query(ImportJob)
+        .filter(ImportJob.id == job_id)
+        .with_for_update()
+        .one()
+    )
+    att = (
+        db.query(Attachment)
+        .filter(Attachment.id == att_id)
+        .with_for_update()
+        .one()
+    )
+    if job.status == "failed":
+        att.ocr_status = "done"
+        att.ocr_raw_text = raw
+        db.commit()
+        return JSONResponse(_progress_dict(job, db, locale=locale))
+
+    att.ocr_raw_text = raw
+    att.ocr_status = "done"
+    from app.services.proposal_filter import filter_proposals
+
+    payload = _job_payload(job)
+    for p in filter_proposals(proposals):
+        row = dict(p)
+        row["attachment_id"] = att.id
+        payload.setdefault("proposals", []).append(row)
+    # Dedupe across files already merged into this job
+    payload["proposals"] = filter_proposals(payload.get("proposals") or [])
+    payload.setdefault("raw_parts", []).append(f"--- {filename} ---\n{raw or ''}")
+    lab = ((meta or {}).get("lab_name") or "").strip()
+    if lab and not (payload.get("detected_lab") or "").strip():
+        payload["detected_lab"] = lab
+    _save_job_payload(job, payload)
+
+    active = (
+        db.query(Attachment)
+        .filter(
+            Attachment.import_job_id == job.id,
+            Attachment.ocr_status.in_(("pending", "processing")),
+            Attachment.id != att.id,
+        )
+        .count()
+    )
+    if active == 0:
+        _finalize_job(db, job)
+    db.commit()
+    return JSONResponse(_progress_dict(job, db, locale=locale))
 
 
 @router.get("/conditions", response_class=HTMLResponse)

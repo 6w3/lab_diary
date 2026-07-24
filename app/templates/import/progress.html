@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ t('import_progress_title') }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<section class="import-progress card" id="import-progress"
+         data-job-id="{{ job.id }}"
+         data-status="{{ progress.status }}"
+         data-review-url="/import/{{ job.id }}/review"
+         data-max-workers="2">
+  <h1>{{ t('import_progress_title') }}</h1>
+  <div class="spinner" aria-hidden="true"></div>
+  <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
+  <div class="progress-bar" role="progressbar"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}">
+    <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
+  </div>
+  <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
+  <p class="error" id="progress-error" {% if progress.status != 'failed' %}hidden{% endif %}>{{ progress.error or progress.message }}</p>
+  <p id="progress-actions" {% if progress.status != 'failed' %}hidden{% endif %}>
+    <a class="btn" href="/import">{{ t('upload_report') }}</a>
+  </p>
+</section>
+<script>
+(function () {
+  const root = document.getElementById("import-progress");
+  if (!root) return;
+  const jobId = root.dataset.jobId;
+  const maxWorkers = Math.max(1, parseInt(root.dataset.maxWorkers || "2", 10) || 2);
+  const statusEl = document.getElementById("progress-status");
+  const fillEl = document.getElementById("progress-fill");
+  const countEl = document.getElementById("progress-count");
+  const errorEl = document.getElementById("progress-error");
+  const actionsEl = document.getElementById("progress-actions");
+  const bar = root.querySelector(".progress-bar");
+  let inFlight = 0;
+  let stopped = false;
+
+  function apply(data) {
+    if (statusEl) statusEl.textContent = data.message || "";
+    if (fillEl) fillEl.style.width = (data.percent || 0) + "%";
+    if (bar) bar.setAttribute("aria-valuenow", String(data.percent || 0));
+    if (countEl) countEl.textContent = (data.done || 0) + " / " + (data.total || 0);
+    if (data.status === "review" && data.review_url) {
+      stopped = true;
+      window.location.href = data.review_url;
+      return true;
+    }
+    if (data.status === "failed") {
+      stopped = true;
+      root.classList.add("is-failed");
+      if (errorEl) {
+        errorEl.hidden = false;
+        errorEl.textContent = data.error || data.message || "";
+      }
+      if (actionsEl) actionsEl.hidden = false;
+      return true;
+    }
+    return false;
+  }
+
+  async function step() {
+    if (stopped) return;
+    inFlight += 1;
+    try {
+      const res = await fetch("/import/" + jobId + "/process-step", {
+        method: "POST",
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin",
+      });
+      const data = await res.json();
+      if (apply(data)) return;
+      // No pending work yet (other worker still busy) — brief pause then retry
+      const idle = (data.done || 0) >= (data.total || 0) && data.status === "processing";
+      setTimeout(pump, idle ? 200 : 40);
+    } catch (err) {
+      stopped = true;
+      root.classList.add("is-failed");
+      if (errorEl) {
+        errorEl.hidden = false;
+        errorEl.textContent = String(err);
+      }
+      if (actionsEl) actionsEl.hidden = false;
+    } finally {
+      inFlight -= 1;
+    }
+  }
+
+  function pump() {
+    if (stopped) return;
+    while (inFlight < maxWorkers) {
+      step();
+    }
+  }
+
+  if (root.dataset.status === "failed") {
+    root.classList.add("is-failed");
+    return;
+  }
+  if (root.dataset.status === "review") {
+    window.location.href = root.dataset.reviewUrl;
+    return;
+  }
+  pump();
+})();
+</script>
+{% endblock %}

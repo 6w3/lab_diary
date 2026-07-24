@@ -15,6 +15,7 @@ import httpx
 from PIL import Image
 
 from app.config import get_settings
+from app.services.proposal_filter import filter_proposals, is_junk_label
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,10 @@ Rules:
 - Prefer ISO dates YYYY-MM-DD in output.
 - Numbers as JSON numbers (dot decimal). Values like ">1.50" → 1.50 and note in warnings if needed.
 - Skip non-lab rows (ano/ne flags, comments, diagnoses, prescriptions, vitals like TK/P/weight unless they are lab analytes).
-- When a known catalog code matches, set marker_code exactly (e.g. hgb, glucose, creatinine, alt, ggt, wbc, plt). Otherwise omit marker_code and keep the original label.
+- NEVER extract report header/metadata as results: ČP, IČO, IČP, Plátce, Dg., věk, pohlaví, datum narození, číslo sestavení, číslo průvodky, přijato, svozová trasa, page numbers, accreditation marks (AM), lab site codes (HAD), column headers (Název vyšetření / Výsledek / Jednotka / Meze).
+- Only rows that are real laboratory analytes (biochemistry, hematology, hormones, urine chem, etc.) with a numeric result.
+- Do NOT emit duplicate rows for the same analyte on the same draw date (same marker + same value).
+- When a known catalog code matches, set marker_code exactly (e.g. hgb, glucose, creatinine, alt, ggt, alp, wbc, plt, neutrophils). Otherwise omit marker_code and keep the original label.
 - Keep original units from the report; do not invent conversions.
 - Extract EVERY visible lab analyte row (biochemistry + hematology), not just one marker.
 """
@@ -136,7 +140,7 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
                 except (TypeError, ValueError):
                     continue
             label = str(r.get("label") or "").strip()
-            if len(label) < 2:
+            if len(label) < 2 or is_junk_label(label):
                 continue
             marker_code = str(r.get("marker_code") or "").strip() or None
             # Guard: placeholder/example echo
@@ -166,6 +170,7 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
                     "proposed_drawn_on": drawn_on,
                 }
             )
+        results_out = filter_proposals(results_out)
         if results_out:
             lab = d.get("lab_name")
             lab_s = str(lab).strip() if lab not in (None, "") else None
@@ -342,7 +347,7 @@ def _flatten_draws(parsed: dict[str, Any]) -> list[dict]:
     proposals: list[dict] = []
     for d in parsed.get("draws") or []:
         proposals.extend(d.get("results") or [])
-    return proposals
+    return filter_proposals(proposals)
 
 
 def _build_extract_content(

@@ -51,3 +51,45 @@ def test_resolve_user_alias():
 def test_normalize_alias_strips_lab_prefix():
     assert normalize_alias_label("HAD AM S WeirdAST") == "weirdast"
     assert normalize_alias_label("  Hemoglobin  ") == "hemoglobin"
+
+
+def test_match_alp():
+    m = match_marker("S_ALP", _catalog())
+    assert m is not None
+    assert m.code == "alp"
+
+
+def test_match_neutrophils_abs_spaced():
+    m = match_marker("Neutrofily abs. počet", _catalog())
+    assert m is not None
+    assert m.code == "neutrophils_abs"
+
+
+def test_match_neutrophils_abs_glued():
+    m = match_marker("Neutrofilyabs.počet", _catalog())
+    assert m is not None
+    assert m.code == "neutrophils_abs"
+
+
+def test_match_triacylglyceroly():
+    m = match_marker("S_Triacylglyceroly", _catalog())
+    assert m is not None
+    assert m.code == "triglycerides"
+
+
+def test_match_anti_tg():
+    m = match_marker("S_anti-TG", _catalog())
+    assert m is not None
+    assert m.code == "anti_tg"
+
+
+def test_match_immature_granulocytes_abs():
+    m = match_marker("Nezralégranulocytyabs.počet", _catalog())
+    assert m is not None
+    assert m.code == "ig_abs"
+
+
+def test_match_relative_neutrophils():
+    m = match_marker("B_Neutrofily", _catalog())
+    assert m is not None
+    assert m.code == "neutrophils"

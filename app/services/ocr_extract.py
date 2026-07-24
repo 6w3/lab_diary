@@ -89,9 +89,13 @@ def extract_document(storage_path: str) -> tuple[str, list[dict], dict]:
         proposals = flatten_multi_date(multi)
         meta["mode"] = "multi_date"
         meta["dates"] = multi["dates"]
-        return raw, proposals, meta
+        from app.services.proposal_filter import filter_proposals
 
-    proposals = parse_ocr_lines(raw)
+        return raw, filter_proposals(proposals), meta
+
+    from app.services.proposal_filter import filter_proposals
+
+    proposals = filter_proposals(parse_ocr_lines(raw))
     return raw, proposals, meta
 
 
