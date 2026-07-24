@@ -9,9 +9,13 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
-from app.models import Attachment, BloodDraw, CustomMarker, DrawConditions, Marker, ResultValue
+from app.models import Attachment, BloodDraw, CustomMarker, DrawConditions, Marker, ResultValue, User
 from app.services.markers import match_marker
-from app.services.storage import normalize_unit, run_ocr, save_upload
+from app.services.ocr_extract import extract_document
+from app.services.ocr_parse import normalize_unit
+from app.services.ocr_tables import date_to_datetime, parse_iso_date
+from app.services.smart_extract import run_smart_extract, smart_enabled
+from app.services.storage import save_upload
 
 router = APIRouter(prefix="/draws", tags=["draws"])
 templates = Jinja2Templates(directory="app/templates")
@@ -163,6 +167,7 @@ def draw_detail(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, d
             draw=draw,
             markers=markers,
             confirmed_results=_display_results(draw, locale),
+            smart_available=smart_enabled(),
         ),
     )
 
@@ -214,16 +219,39 @@ def delete_draw(db: DbDep, user: UserDep, draw_id: int):
 
 @router.post("/{draw_id}/upload")
 async def upload_files(
+    request: Request,
     db: DbDep,
     user: UserDep,
     draw_id: int,
     files: list[UploadFile] = File(...),
+    extract_mode: str = Form("classic"),
+    smart_consent: str = Form(""),
 ):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
+    mode = (extract_mode or "classic").lower()
+    if mode == "smart":
+        if not smart_enabled():
+            request.session["flash"] = "Smart AI není nakonfigurované (NVIDIA_API_KEY)."
+            return redirect(f"/draws/{draw_id}")
+        if smart_consent not in {"1", "on", "true", "yes"}:
+            request.session["flash"] = "Pro Smart AI je potřeba souhlas s odesláním reportu na NVIDIA."
+            return redirect(f"/draws/{draw_id}")
+
     existing = len(draw.attachments)
     settings = get_settings()
+    catalog = db.query(Marker).all()
+    marker_hints = [m.name_cs for m in catalog] + [m.code for m in catalog]
+    last_att_id = None
+
+    def _proposal_dt(p: dict) -> datetime | None:
+        raw = p.get("proposed_drawn_on")
+        if not raw:
+            return None
+        d = parse_iso_date(str(raw))
+        return date_to_datetime(d) if d else None
+
     for file in files:
         if existing >= settings.max_attachments_per_draw:
             break
@@ -240,15 +268,18 @@ async def upload_files(
         )
         db.add(att)
         db.flush()
+        last_att_id = att.id
         try:
-            raw, proposals = run_ocr(storage_path)
+            if mode == "smart":
+                raw, proposals, _meta = run_smart_extract(storage_path, marker_hints=marker_hints)
+            else:
+                raw, proposals, _meta = extract_document(storage_path)
             att.ocr_raw_text = raw
             att.ocr_status = "done"
-            catalog = db.query(Marker).all()
             for p in proposals:
                 matched = match_marker(p.get("label") or "", catalog)
                 label = matched.name_cs if matched else p.get("label")
-                unit = p.get("unit") or ""
+                unit = normalize_unit(p.get("unit") or "")
                 if matched and not unit:
                     unit = matched.default_unit
                 db.add(
@@ -262,13 +293,28 @@ async def upload_files(
                         lab_ref_high=p.get("lab_ref_high"),
                         confirmed=False,
                         label=label,
+                        proposed_drawn_on=_proposal_dt(p),
                     )
                 )
         except Exception as exc:  # noqa: BLE001
             att.ocr_status = "failed"
             att.ocr_raw_text = str(exc)
+            if mode == "smart":
+                request.session["flash"] = f"Smart AI selhalo ({exc}). Zkus Classic režim."
         existing += 1
     db.commit()
+    if last_att_id:
+        pending = (
+            db.query(ResultValue)
+            .filter(
+                ResultValue.blood_draw_id == draw.id,
+                ResultValue.attachment_id == last_att_id,
+                ResultValue.confirmed.is_(False),
+            )
+            .count()
+        )
+        if pending:
+            return redirect(f"/draws/{draw.id}/ocr/{last_att_id}")
     return redirect(f"/draws/{draw.id}")
 
 
@@ -290,15 +336,56 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             "notes": r.notes or "",
             "id": r.id,
             "marker_code": r.marker_code,
+            "proposed_drawn_on": r.proposed_drawn_on.strftime("%Y-%m-%d") if r.proposed_drawn_on else "",
         }
         for r in draw.results
         if not r.confirmed and r.attachment_id == att.id
     ]
+    multi_date = any(p["proposed_drawn_on"] for p in proposals)
     return templates.TemplateResponse(
         request,
         "draws/ocr_review.html",
-        template_context(request, locale, draw=draw, attachment=att, proposals=proposals),
+        template_context(
+            request,
+            locale,
+            draw=draw,
+            attachment=att,
+            proposals=proposals,
+            multi_date=multi_date,
+        ),
     )
+
+
+def _resolve_target_draw(
+    db,
+    user: User,
+    source: BloodDraw,
+    proposed: datetime | None,
+) -> BloodDraw:
+    """Keep on source draw if same calendar day / no proposal; else find/create draw."""
+    if proposed is None:
+        return source
+    src_day = source.drawn_at.date() if source.drawn_at else None
+    prop_day = proposed.date()
+    if src_day == prop_day:
+        return source
+    existing = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.user_id == user.id, BloodDraw.lab_name == source.lab_name)
+        .all()
+    )
+    for cand in existing:
+        if cand.drawn_at and cand.drawn_at.date() == prop_day:
+            return cand
+    new_draw = BloodDraw(
+        user_id=user.id,
+        drawn_at=proposed,
+        lab_name=source.lab_name,
+        workplace=source.workplace,
+    )
+    db.add(new_draw)
+    db.flush()
+    return new_draw
 
 
 @router.post("/{draw_id}/ocr/{attachment_id}/confirm")
@@ -324,13 +411,16 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
         row.lab_ref_high = float(high) if high else None
         note = (form.get(f"notes_{idx}") or "").strip()
         row.notes = note or None
+        date_raw = (form.get(f"date_{idx}") or "").strip()
+        if date_raw:
+            d = parse_iso_date(date_raw)
+            row.proposed_drawn_on = date_to_datetime(d) if d else row.proposed_drawn_on
         matched = match_marker(row.label or "", catalog)
         if matched:
             row.marker_code = matched.code
             row.custom_marker_id = None
             if not row.unit:
                 row.unit = matched.default_unit
-            # Prefer catalog Czech name in stored label after confirm
             row.label = matched.name_cs
         elif row.label:
             row.marker_code = None
@@ -344,8 +434,10 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
                 db.add(existing)
                 db.flush()
             row.custom_marker_id = existing.id
+        target = _resolve_target_draw(db, user, draw, row.proposed_drawn_on)
+        row.blood_draw_id = target.id
         row.confirmed = True
-    # delete unselected pending for this attachment only
+        row.proposed_drawn_on = None
     for idx, row in enumerate(pending):
         if str(idx) not in selected:
             db.delete(row)

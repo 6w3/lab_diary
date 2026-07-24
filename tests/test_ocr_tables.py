@@ -1,0 +1,38 @@
+"""Tests for multi-date table parsing and word-box grouping."""
+
+from app.services.ocr_parse import group_words_to_lines, parse_ocr_lines
+from app.services.ocr_tables import flatten_multi_date, parse_multi_date_table
+
+
+def test_group_words_to_lines():
+    words = [
+        {"text": "AST", "x": 10, "y": 100, "h": 12},
+        {"text": "0.42", "x": 80, "y": 102, "h": 12},
+        {"text": "ukat/l", "x": 140, "y": 101, "h": 12},
+        {"text": "ALT", "x": 10, "y": 130, "h": 12},
+        {"text": "0.55", "x": 80, "y": 131, "h": 12},
+    ]
+    lines = group_words_to_lines(words)
+    assert len(lines) == 2
+    assert "AST" in lines[0] and "0.42" in lines[0]
+    assert "ALT" in lines[1]
+
+
+def test_multi_date_flatten():
+    text = """
+Marker          12.01.2025   03.06.2025   Ref
+AST             0.48         0.42         0.10-0.70
+ALT             0.61         0.55         0.10-0.80
+"""
+    parsed = parse_multi_date_table(text)
+    assert parsed is not None
+    flat = flatten_multi_date(parsed)
+    assert len(flat) == 4
+    dates = {r["proposed_drawn_on"] for r in flat}
+    assert "2025-01-12" in dates
+    assert "2025-06-03" in dates
+
+
+def test_parse_still_works_on_single_lines():
+    rows = parse_ocr_lines("TSH 2.1 mIU/l 0.4-4.0")
+    assert rows[0]["label"].upper().startswith("TSH")

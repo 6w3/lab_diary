@@ -51,11 +51,15 @@ def redirect(url: str) -> RedirectResponse:
 
 def template_context(request: Request, locale: str, **extra):
     user = get_current_user(request)
+    flash = None
+    if hasattr(request, "session"):
+        flash = request.session.pop("flash", None)
     return {
         "request": request,
         "locale": locale,
         "user": user,
         "t": lambda key, **kw: t(locale, key, **kw),
         "disclaimer": t(locale, "disclaimer"),
+        "flash": flash,
         **extra,
     }

@@ -97,6 +97,9 @@ th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: le
 .locale-form { margin: 0; }
 .locale-form select { padding: 0.25rem; }
 .meta { padding-left: 1.1rem; }
+.extract-mode { border: 1px solid var(--border); padding: 0.75rem; margin: 0.75rem 0; }
+.extract-mode legend { padding: 0 0.35rem; }
+.smart-consent { margin-top: 0.35rem; }
 .danger-zone { border-color: #e0b4b4; }
 pre { white-space: pre-wrap; font-size: 0.8rem; background: #f5f5f5; padding: 0.75rem; }
 @media (max-width: 640px) {

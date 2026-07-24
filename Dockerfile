@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir .
 RUN mkdir -p /data/uploads
 
 ENV UPLOAD_DIR=/data/uploads
+ENV OCR_ENGINE=auto
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000

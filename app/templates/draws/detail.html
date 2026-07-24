@@ -35,6 +35,20 @@
   <h2>{{ t('attachments') }}</h2>
   <form method="post" action="/draws/{{ draw.id }}/upload" enctype="multipart/form-data">
     <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
+    <fieldset class="extract-mode">
+      <legend>{{ t('extract_mode') }}</legend>
+      <label class="check">
+        <input type="radio" name="extract_mode" value="classic" checked> {{ t('extract_classic') }}
+      </label>
+      {% if smart_available %}
+      <label class="check">
+        <input type="radio" name="extract_mode" value="smart"> {{ t('extract_smart') }}
+      </label>
+      <label class="check smart-consent">
+        <input type="checkbox" name="smart_consent" value="1"> {{ t('smart_consent') }}
+      </label>
+      {% endif %}
+    </fieldset>
     <button type="submit">{{ t('upload') }}</button>
   </form>
   <ul>

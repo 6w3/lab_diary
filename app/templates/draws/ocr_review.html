@@ -2,6 +2,9 @@
 {% block title %}{{ t('ocr_review') }}{% endblock %}
 {% block content %}
 <h1>{{ t('ocr_review') }}</h1>
+{% if multi_date %}
+  <p class="muted">{{ t('multi_date_hint') }}</p>
+{% endif %}
 <form method="post" action="/draws/{{ draw.id }}/ocr/{{ attachment.id }}/confirm">
   <table>
     <thead>
@@ -11,6 +14,7 @@
         <th>{{ t('value') }}</th>
         <th>{{ t('unit') }}</th>
         <th>{{ t('lab_ref') }}</th>
+        {% if multi_date %}<th>{{ t('drawn_at') }}</th>{% endif %}
         <th>{{ t('result_note') }}</th>
       </tr>
     </thead>
@@ -26,6 +30,11 @@
             –
             <input type="number" step="any" name="high_{{ loop.index0 }}" value="{{ r.lab_ref_high if r.lab_ref_high is not none else '' }}" style="width:5rem">
           </td>
+          {% if multi_date %}
+          <td><input type="date" name="date_{{ loop.index0 }}" value="{{ r.proposed_drawn_on }}"></td>
+          {% else %}
+          <input type="hidden" name="date_{{ loop.index0 }}" value="{{ r.proposed_drawn_on }}">
+          {% endif %}
           <td><input type="text" name="notes_{{ loop.index0 }}" value="{{ r.notes }}" placeholder="{{ t('optional') }}"></td>
         </tr>
       {% endfor %}

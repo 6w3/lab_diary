@@ -63,5 +63,10 @@
   "empty_draws": "No draws yet.",
   "ocr_review": "OCR review",
   "ocr_running": "Running OCR…",
+  "extract_mode": "Extract mode",
+  "extract_classic": "Classic (on-server, free)",
+  "extract_smart": "Smart AI (NVIDIA — understands photos/tables)",
+  "smart_consent": "I agree to send this report to NVIDIA NIM for analysis",
+  "multi_date_hint": "Multiple draw dates detected. Confirming will create separate draws per date.",
   "health": "OK"
 }

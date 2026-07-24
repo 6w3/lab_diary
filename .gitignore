@@ -12,6 +12,7 @@ htmlcov/
 dist/
 build/
 uploads/
+.models/
 *.db
 .DS_Store
 .idea/

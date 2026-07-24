@@ -23,12 +23,18 @@ dependencies = [
     "pytesseract>=0.3.13",
     "pillow-heif>=0.20.0",
     "email-validator>=2.2.0",
+    "pdfplumber>=0.11.0",
+    "numpy>=2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
     "ruff>=0.8.0",
+]
+ocr-rapid = [
+    "rapidocr-onnxruntime>=1.4.0",
+    "onnxruntime>=1.19.0",
 ]
 
 [build-system]

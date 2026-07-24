@@ -1,6 +1,6 @@
 # Lab Diary — personal laboratory diary (lab.behejsrdcem.cz)
 
-Osobní laboratorní deník: odběry, podmínky, upload reportů, OCR (Tesseract), strukturované výsledky, trendy.
+Osobní laboratorní deník: odběry, podmínky, upload reportů, OCR, strukturované výsledky, trendy.
 
 **Disclaimer:** osobní deník, ne zdravotní služba / ne diagnóza.
 
@@ -9,14 +9,28 @@ Osobní laboratorní deník: odběry, podmínky, upload reportů, OCR (Tesseract
 - FastAPI + Jinja2 + HTMX + Chart.js
 - MariaDB + SQLAlchemy 2 + Alembic
 - Brevo (e-mail verify)
-- Tesseract OCR
+- Classic extract: PDF text (`pdfplumber`) → RapidOCR (optional) → Tesseract + preprocess
+- Smart extract (optional): NVIDIA NIM vision (`NVIDIA_API_KEY`)
 - Google / Apple OAuth (optional, via env)
+
+## Extract modes
+
+| Mode | Where | Notes |
+|------|--------|--------|
+| **Classic** | VPS | free, data stays local |
+| **Smart** | NVIDIA NIM | needs consent; better for photos / multi-date tables |
+
+Set in `.env`: `NVIDIA_API_KEY`, `SMART_MODEL=nvidia/nemotron-nano-12b-v2-vl`, `OCR_ENGINE=auto|rapid|tesseract`.
+
+Optional RapidOCR: `pip install 'lab-diary[ocr-rapid]'`.
+
+Eval NVIDIA models: `python scripts/eval_nvidia_models.py`
 
 ## Local run
 
 ```bash
 cp .env.example .env
-# fill SECRET_KEY and optionally BREVO_API_KEY
+# fill SECRET_KEY and optionally BREVO_API_KEY / NVIDIA_API_KEY
 docker compose up --build
 ```
 
@@ -35,3 +49,5 @@ App is built from this repo as a git submodule at `vps/services/lab_diary`.
 ```
 
 Domain: `https://lab.behejsrdcem.cz`
+
+Persist uploads at `/vps/data/lab_diary_uploads`, DB at `/vps/data/lab_diary_db`. Put `NVIDIA_API_KEY` in compose env (not git).
