@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from app.models import CustomMarker, Marker
-from app.services.markers import match_marker
+from app.services.markers import resolve_marker
 from app.services.ocr_parse import normalize_unit
 from app.services.units import to_canonical
 
@@ -21,10 +21,7 @@ def bind_marker_and_units(
     code_hint: str | None = None,
 ) -> tuple[str | None, int | None, str | None, float, str, float | None, float | None]:
     """Return marker_code, custom_id, label, value, unit, lab_low, lab_high."""
-    by_code = {m.code: m for m in catalog}
-    matched = by_code.get(code_hint) if code_hint else None
-    if not matched:
-        matched = match_marker(label or "", catalog)
+    matched = resolve_marker(label or "", catalog, code_hint=code_hint)
 
     unit_n = normalize_unit(unit or "")
     if matched:

@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
-from app.services.markers import match_marker
+from app.services.markers import resolve_marker
 from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
@@ -244,7 +244,6 @@ async def upload_files(
     existing = len(draw.attachments)
     settings = get_settings()
     catalog = db.query(Marker).all()
-    by_code = {m.code: m for m in catalog}
     marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
     last_att_id = None
 
@@ -282,9 +281,7 @@ async def upload_files(
             att.ocr_status = "done"
             for p in proposals:
                 code_hint = (p.get("marker_code") or "").strip() or None
-                matched = by_code.get(code_hint) if code_hint else None
-                if not matched:
-                    matched = match_marker(p.get("label") or "", catalog)
+                matched = resolve_marker(p.get("label") or "", catalog, code_hint=code_hint)
                 label = matched.name_cs if matched else p.get("label")
                 unit = normalize_unit(p.get("unit") or "")
                 if matched and not unit:

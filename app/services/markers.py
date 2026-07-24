@@ -14,9 +14,16 @@ class MarkerLike(Protocol):
 MARKER_SEED: list[dict] = [
     {"code": "hgb", "name_cs": "Hemoglobin", "name_en": "Hemoglobin", "default_unit": "g/l", "tip_ref_low": 135, "tip_ref_high": 170},
     {"code": "hct", "name_cs": "Hematokrit", "name_en": "Hematocrit", "default_unit": "%", "tip_ref_low": 40, "tip_ref_high": 50},
+    {"code": "rbc", "name_cs": "Erytrocyty", "name_en": "RBC", "default_unit": "10^12/l", "tip_ref_low": 4.0, "tip_ref_high": 5.8},
     {"code": "mcv", "name_cs": "MCV", "name_en": "MCV", "default_unit": "fl", "tip_ref_low": 80, "tip_ref_high": 96},
+    {"code": "mch", "name_cs": "MCH", "name_en": "MCH", "default_unit": "pg", "tip_ref_low": 27, "tip_ref_high": 32},
+    {"code": "mchc", "name_cs": "MCHC", "name_en": "MCHC", "default_unit": "g/l", "tip_ref_low": 320, "tip_ref_high": 360},
+    {"code": "rdw", "name_cs": "RDW", "name_en": "RDW", "default_unit": "%", "tip_ref_low": 11, "tip_ref_high": 15},
     {"code": "wbc", "name_cs": "Leukocyty", "name_en": "WBC", "default_unit": "10^9/l", "tip_ref_low": 4.0, "tip_ref_high": 10.0},
     {"code": "plt", "name_cs": "Trombocyty", "name_en": "Platelets", "default_unit": "10^9/l", "tip_ref_low": 150, "tip_ref_high": 400},
+    {"code": "mpv", "name_cs": "MPV", "name_en": "MPV", "default_unit": "fl", "tip_ref_low": 7, "tip_ref_high": 12},
+    {"code": "pdw", "name_cs": "PDW", "name_en": "PDW", "default_unit": "%", "tip_ref_low": 9, "tip_ref_high": 17},
+    {"code": "nrbc", "name_cs": "Normoblasty", "name_en": "NRBC", "default_unit": "10^9/l", "tip_ref_low": None, "tip_ref_high": 0.0},
     {"code": "ferritin", "name_cs": "Feritin", "name_en": "Ferritin", "default_unit": "ug/l", "tip_ref_low": 30, "tip_ref_high": 300},
     {"code": "iron", "name_cs": "Železo", "name_en": "Iron", "default_unit": "umol/l", "tip_ref_low": 11, "tip_ref_high": 30},
     {"code": "vitamin_d", "name_cs": "Vitamin D (25-OH)", "name_en": "Vitamin D (25-OH)", "default_unit": "nmol/l", "tip_ref_low": 75, "tip_ref_high": 125},
@@ -55,7 +62,7 @@ MARKER_SEED: list[dict] = [
 
 # Display order for trends / multi-chart pages (category → marker codes).
 MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
-    ("hematology", ["hgb", "hct", "mcv", "wbc", "plt"]),
+    ("hematology", ["hgb", "hct", "rbc", "mcv", "mch", "mchc", "rdw", "wbc", "plt", "mpv", "pdw", "nrbc"]),
     ("iron", ["ferritin", "iron"]),
     ("vitamins", ["vitamin_d", "b12", "folate"]),
     ("thyroid", ["tsh", "ft4", "ft3"]),
@@ -142,6 +149,35 @@ MARKER_ALIASES: dict[str, str] = {
     "hemoglobin": "hgb",
     "hb": "hgb",
     "hgb": "hgb",
+    "hematokrit": "hct",
+    "hct": "hct",
+    "erytrocyty": "rbc",
+    "erythrocytes": "rbc",
+    "rbc": "rbc",
+    "mcv": "mcv",
+    "strobjerytr": "mcv",
+    "str.obj.erytr": "mcv",
+    "mch": "mch",
+    "barvivo erytr": "mch",
+    "barvivo erytrocytu": "mch",
+    "mchc": "mchc",
+    "str.barev.kon": "mchc",
+    "strebarevkon": "mchc",
+    "rdw": "rdw",
+    "distr.kriv.ery": "rdw",
+    "distrkriv.ery": "rdw",
+    "wbc": "wbc",
+    "leukocyty": "wbc",
+    "plt": "plt",
+    "trombocyty": "plt",
+    "mpv": "mpv",
+    "str.obj.trombo": "mpv",
+    "strobjtrombo": "mpv",
+    "pdw": "pdw",
+    "distrkriv.tr": "pdw",
+    "distr.kriv.tr": "pdw",
+    "nrbc": "nrbc",
+    "normoblasty": "nrbc",
     "glukoza": "glucose",
     "glukóza": "glucose",
     "glucose": "glucose",
@@ -213,12 +249,36 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
     folded_compact = re.sub(r"[^a-z0-9]+", "", folded)
     by_code = {m.code: m for m in markers}
 
-    # 1) alias exact
+    tokens_raw = [t for t in re.split(r"[\s/|]+", cleaned) if t]
+    tokens = [_fold(t).strip("()[].,:;#") for t in tokens_raw]
+    tokens = [t for t in tokens if t]
+
+    # 0) Trailing lab abbreviation (e.g. "Barvivo erytr. MCH" → MCH)
+    for tok in reversed(tokens):
+        if tok in MARKER_ALIASES and MARKER_ALIASES[tok] in by_code:
+            return by_code[MARKER_ALIASES[tok]]
+        if tok in by_code:
+            return by_code[tok]
+        for m in markers:
+            if tok == _fold(m.code) or tok == _fold(m.name_cs) or tok == _fold(m.name_en):
+                return m
+
+    # 1) alias exact on full label
     if folded in MARKER_ALIASES and MARKER_ALIASES[folded] in by_code:
         return by_code[MARKER_ALIASES[folded]]
 
-    # 2) code / names exact (folded)
-    candidates: list[tuple[int, Marker]] = []
+    # 2) multi-word alias (e.g. "barvivo erytr")
+    for n in (3, 2):
+        if len(tokens) >= n:
+            phrase = " ".join(tokens[-n:])
+            if phrase in MARKER_ALIASES and MARKER_ALIASES[phrase] in by_code:
+                return by_code[MARKER_ALIASES[phrase]]
+            phrase2 = " ".join(tokens[:n])
+            if phrase2 in MARKER_ALIASES and MARKER_ALIASES[phrase2] in by_code:
+                return by_code[MARKER_ALIASES[phrase2]]
+
+    # 3) code / names exact or contained (prefer longer names)
+    candidates: list[tuple[int, MarkerLike]] = []
     for m in markers:
         names = {_fold(m.code), _fold(m.name_cs), _fold(m.name_en)}
         if folded in names or folded_compact == re.sub(r"[^a-z0-9]+", "", _fold(m.code)):
@@ -230,7 +290,6 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
             if name == folded:
                 candidates.append((900 + len(name), m))
             elif len(name) >= 3 and (name in folded or folded in name):
-                # Prefer longer analyte names to avoid 'k' / 'ca' false positives via substring path
                 score = 100 + len(name)
                 if re.search(rf"(^|[^a-z0-9]){re.escape(name)}([^a-z0-9]|$)", folded):
                     score += 200
@@ -239,13 +298,17 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
     if candidates:
         candidates.sort(key=lambda x: x[0], reverse=True)
         return candidates[0][1]
-
-    # 3) alias token-wise (last token often is the analyte: AST)
-    tokens = [_fold(t) for t in cleaned.split() if t]
-    for tok in reversed(tokens):
-        if tok in MARKER_ALIASES and MARKER_ALIASES[tok] in by_code:
-            return by_code[MARKER_ALIASES[tok]]
-        for m in markers:
-            if tok == _fold(m.code) or tok == _fold(m.name_cs) or tok == _fold(m.name_en):
-                return m
     return None
+
+
+def resolve_marker(
+    label: str,
+    markers: list[MarkerLike],
+    *,
+    code_hint: str | None = None,
+) -> MarkerLike | None:
+    """Prefer explicit catalog code from Smart AI, else fuzzy label match."""
+    by_code = {m.code: m for m in markers}
+    if code_hint and code_hint in by_code:
+        return by_code[code_hint]
+    return match_marker(label, markers)
