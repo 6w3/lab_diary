@@ -55,7 +55,7 @@ Rules:
 - Prefer ISO dates YYYY-MM-DD in output.
 - Numbers as JSON numbers (dot decimal). Values like ">1.50" → 1.50 and note in warnings if needed.
 - Skip non-lab rows (ano/ne flags, comments, diagnoses, prescriptions, vitals like TK/P/weight unless they are lab analytes).
-- NEVER extract report header/metadata as results: ČP, IČO, IČP, Plátce, Dg., věk, pohlaví, datum narození, číslo sestavení, číslo průvodky, přijato, svozová trasa, page numbers, accreditation marks (AM), lab site codes (HAD), column headers (Název vyšetření / Výsledek / Jednotka / Meze).
+- NEVER extract report header/metadata as results: ČP, IČO, IČP, Plátce, Dg., věk, pohlaví, datum narození, číslo sestavení, číslo průvodky, protokol číslo, přijato, svozová trasa, pracoviště / address lines, "Sestaveno a vydáno", page numbers, accreditation marks (AM), lab site codes (HAD), column headers (Název vyšetření / Výsledek / Jednotka / Meze).
 - Only rows that are real laboratory analytes (biochemistry, hematology, hormones, urine chem, etc.) with a numeric result.
 - Do NOT emit duplicate rows for the same analyte on the same draw date (same marker + same value).
 - When a known catalog code matches, set marker_code exactly (e.g. hgb, glucose, creatinine, alt, ggt, alp, wbc, plt, neutrophils). Otherwise omit marker_code and keep the original label.

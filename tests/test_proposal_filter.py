@@ -14,6 +14,15 @@ def test_junk_cp_platce():
     assert is_junk_label("Plátce: 094")
 
 
+def test_junk_footer_metadata():
+    assert is_junk_label("PracovištěHadovka,Evropská")
+    assert is_junk_label("Pracoviště Hadovka")
+    assert is_junk_label("Protokolčíslo")
+    assert is_junk_label("Protokol číslo")
+    assert is_junk_label("Sestavenoavydáno")
+    assert is_junk_label("Sestaveno a vydáno")
+
+
 def test_keeps_real_analytes():
     assert not is_junk_label("ALP")
     assert not is_junk_label("S_Triacylglyceroly")

@@ -25,6 +25,10 @@ _JUNK_EXACT: set[str] = {
     "pruvodce",
     "pruvodce cislo",
     "sestaveno",
+    "sestaveno a vydano",
+    "protokol",
+    "protokol cislo",
+    "pracoviste",
     "strana",
     "hodnoceni",
     "meze",
@@ -43,6 +47,7 @@ _JUNK_EXACT: set[str] = {
     "lab.online",
     "unilabs online",
     "cislo sestaveni",
+    "vydavajici laborator",
 }
 
 # Substrings (folded, compact) — glued OCR like "cisloosestaveni"
@@ -55,6 +60,10 @@ _JUNK_COMPACT_SUBSTR: tuple[str, ...] = (
     "vydavajicilaborator",
     "pruvodcecislo",
     "kpruvodce",
+    "protokolcislo",
+    "sestavenoavydano",
+    "pracovistehadovka",
+    "pracoviste",
 )
 
 _JUNK_PHRASE_SUBSTR: tuple[str, ...] = (
@@ -71,6 +80,22 @@ _JUNK_PHRASE_SUBSTR: tuple[str, ...] = (
     "elektronickou peceti",
     "klasifikace dokum",
     "bez souhlasu laborator",
+    "sestaveno a vydano",
+    "protokol cislo",
+    "protokol číslo",
+)
+
+# Folded prefixes of footer/header metadata lines
+_JUNK_PREFIXES: tuple[str, ...] = (
+    "pracoviste",
+    "protokol",
+    "sestaveno",
+    "vydavajici",
+    "platce",
+    "pruvodce",
+    "svozova",
+    "lab online",
+    "unilabs",
 )
 
 
@@ -114,6 +139,13 @@ def is_junk_label(label: str) -> bool:
         return True
     if folded.startswith("ico") or folded.startswith("icp"):
         return True
+    for prefix in _JUNK_PREFIXES:
+        if folded.startswith(prefix) or compact.startswith(_compact(prefix)):
+            return True
+    # Address/site leftovers glued to workplace names
+    if "hadovka" in compact or "evropska" in compact:
+        if "pracoviste" in compact or "laborator" in compact or "," in cleaned:
+            return True
     return False
 
 

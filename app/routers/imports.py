@@ -15,7 +15,7 @@ from app.services.draw_organize import (
     apply_draw_conditions,
     find_draw_candidates,
     link_attachment_to_draw,
-    resolve_draw_for_group,
+    resolve_draw_cached,
     result_is_duplicate,
 )
 from app.services.label_aliases import load_user_aliases
@@ -552,6 +552,7 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             date_choices[date_key] = (form.get(key) or "new").strip()
 
     touched: dict[int, bool] = {}  # draw_id → is_new
+    draw_cache: dict = {}  # one draw per date+merge choice within this confirm
     added = 0
     skipped = 0
     job_attachments = (
@@ -609,13 +610,15 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             allow_fuzzy=allow_fuzzy,
         )
 
-        draw, is_new = resolve_draw_for_group(
+        draw, is_new = resolve_draw_cached(
+            draw_cache,
             db,
             user.id,
             drawn_at=drawn_at,
             lab_name=lab_name,
             workplace=workplace,
             choice=choice,
+            group_key=date_raw or drawn_at.strftime("%Y-%m-%d"),
         )
         if draw.id not in touched:
             touched[draw.id] = is_new

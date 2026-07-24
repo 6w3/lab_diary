@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 from app.services.draw_organize import (
     find_draw_candidates,
+    resolve_draw_cached,
     resolve_draw_for_group,
     result_is_duplicate,
     values_close,
@@ -123,6 +124,61 @@ def test_resolve_existing_choice():
     assert not is_new
     assert draw.id == 5
     assert draw.workplace == "A"
+
+
+def test_resolve_cached_reuses_new_draw_same_date():
+    db = _FakeDB()
+    cache: dict = {}
+    d1, n1 = resolve_draw_cached(
+        cache,
+        db,
+        1,
+        drawn_at=datetime(2024, 6, 7),
+        lab_name="Lab",
+        workplace=None,
+        choice="new",
+        group_key="2024-06-07",
+    )
+    d2, n2 = resolve_draw_cached(
+        cache,
+        db,
+        1,
+        drawn_at=datetime(2024, 6, 7),
+        lab_name="Lab",
+        workplace=None,
+        choice="new",
+        group_key="2024-06-07",
+    )
+    assert n1 and n2
+    assert d1.id == d2.id
+    assert len(db.added) == 1
+
+
+def test_resolve_cached_separate_dates():
+    db = _FakeDB()
+    cache: dict = {}
+    d1, _ = resolve_draw_cached(
+        cache,
+        db,
+        1,
+        drawn_at=datetime(2024, 6, 7),
+        lab_name="Lab",
+        workplace=None,
+        choice="new",
+        group_key="2024-06-07",
+    )
+    d2, _ = resolve_draw_cached(
+        cache,
+        db,
+        1,
+        drawn_at=datetime(2024, 6, 8),
+        lab_name="Lab",
+        workplace=None,
+        choice="new",
+        group_key="2024-06-08",
+    )
+    assert d1.id != d2.id
+    assert len(db.added) == 2
 
 
 def test_result_is_duplicate_same_marker_value():

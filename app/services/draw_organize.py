@@ -83,6 +83,10 @@ def resolve_draw_for_group(
     choice:
       - None / "" / "new" → always create new draw
       - "existing:{id}" → use that draw if owned
+
+    Callers confirming many rows for one date must reuse the returned draw
+    within the batch (see resolve_draw_cached) — otherwise each row creates
+    a separate draw.
     """
     from app.models import BloodDraw
 
@@ -102,6 +106,34 @@ def resolve_draw_for_group(
                 draw.workplace = workplace
             return draw, False
     return create_draw(db, user_id, drawn_at, lab_name, workplace), True
+
+
+def resolve_draw_cached(
+    cache: dict,
+    db,
+    user_id: int,
+    *,
+    drawn_at: datetime,
+    lab_name: str,
+    workplace: str | None,
+    choice: str | None,
+    group_key: str,
+) -> tuple:
+    """Resolve draw once per (group_key, choice) within a confirm batch."""
+    raw = (choice or "new").strip() or "new"
+    key = f"{group_key}|{raw}"
+    if key in cache:
+        return cache[key]
+    draw, is_new = resolve_draw_for_group(
+        db,
+        user_id,
+        drawn_at=drawn_at,
+        lab_name=lab_name,
+        workplace=workplace,
+        choice=raw,
+    )
+    cache[key] = (draw, is_new)
+    return draw, is_new
 
 
 def values_close(a: float, b: float, *, rel: float = 1e-6, abs_tol: float = 1e-9) -> bool:
