@@ -9,13 +9,15 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
-from app.models import Attachment, BloodDraw, CustomMarker, DrawConditions, Marker, ResultValue, User
+from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
 from app.services.markers import match_marker
 from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
+from app.services.result_bind import bind_marker_and_units
 from app.services.smart_extract import run_smart_extract, smart_enabled
 from app.services.storage import save_upload
+from app.services.units import UNIT_CHOICES, unit_options_for_marker
 
 router = APIRouter(prefix="/draws", tags=["draws"])
 templates = Jinja2Templates(directory="app/templates")
@@ -224,25 +226,25 @@ async def upload_files(
     user: UserDep,
     draw_id: int,
     files: list[UploadFile] = File(...),
-    extract_mode: str = Form("classic"),
+    extract_mode: str = Form("smart"),
     smart_consent: str = Form(""),
 ):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    mode = (extract_mode or "classic").lower()
+    mode = (extract_mode or "smart").lower()
     if mode == "smart":
         if not smart_enabled():
-            request.session["flash"] = "Smart AI není nakonfigurované (NVIDIA_API_KEY)."
-            return redirect(f"/draws/{draw_id}")
-        if smart_consent not in {"1", "on", "true", "yes"}:
+            mode = "classic"
+        elif smart_consent not in {"1", "on", "true", "yes"}:
             request.session["flash"] = "Pro Smart AI je potřeba souhlas s odesláním reportu na NVIDIA."
             return redirect(f"/draws/{draw_id}")
 
     existing = len(draw.attachments)
     settings = get_settings()
     catalog = db.query(Marker).all()
-    marker_hints = [m.name_cs for m in catalog] + [m.code for m in catalog]
+    by_code = {m.code: m for m in catalog}
+    marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
     last_att_id = None
 
     def _proposal_dt(p: dict) -> datetime | None:
@@ -277,7 +279,10 @@ async def upload_files(
             att.ocr_raw_text = raw
             att.ocr_status = "done"
             for p in proposals:
-                matched = match_marker(p.get("label") or "", catalog)
+                code_hint = (p.get("marker_code") or "").strip() or None
+                matched = by_code.get(code_hint) if code_hint else None
+                if not matched:
+                    matched = match_marker(p.get("label") or "", catalog)
                 label = matched.name_cs if matched else p.get("label")
                 unit = normalize_unit(p.get("unit") or "")
                 if matched and not unit:
@@ -326,21 +331,29 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
     att = db.get(Attachment, attachment_id)
     if not att or att.blood_draw_id != draw.id:
         return redirect(f"/draws/{draw_id}")
-    proposals = [
-        {
-            "label": r.label or "",
-            "value": r.value,
-            "unit": r.unit,
-            "lab_ref_low": r.lab_ref_low,
-            "lab_ref_high": r.lab_ref_high,
-            "notes": r.notes or "",
-            "id": r.id,
-            "marker_code": r.marker_code,
-            "proposed_drawn_on": r.proposed_drawn_on.strftime("%Y-%m-%d") if r.proposed_drawn_on else "",
-        }
-        for r in draw.results
-        if not r.confirmed and r.attachment_id == att.id
-    ]
+    proposals = []
+    for r in draw.results:
+        if r.confirmed or r.attachment_id != att.id:
+            continue
+        unit_opts = unit_options_for_marker(
+            r.marker.default_unit if r.marker else (r.unit or "")
+        )
+        if r.unit and r.unit not in unit_opts:
+            unit_opts = [r.unit] + unit_opts
+        proposals.append(
+            {
+                "label": r.label or "",
+                "value": r.value,
+                "unit": r.unit,
+                "unit_options": unit_opts,
+                "lab_ref_low": r.lab_ref_low,
+                "lab_ref_high": r.lab_ref_high,
+                "notes": r.notes or "",
+                "id": r.id,
+                "marker_code": r.marker_code or "",
+                "proposed_drawn_on": r.proposed_drawn_on.strftime("%Y-%m-%d") if r.proposed_drawn_on else "",
+            }
+        )
     multi_date = any(p["proposed_drawn_on"] for p in proposals)
     return templates.TemplateResponse(
         request,
@@ -352,6 +365,8 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             attachment=att,
             proposals=proposals,
             multi_date=multi_date,
+            unit_choices=UNIT_CHOICES,
+            default_date=draw.drawn_at.strftime("%Y-%m-%d") if draw.drawn_at else "",
         ),
     )
 
@@ -398,48 +413,65 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
     count = int(form.get("count") or 0)
     pending = [r for r in draw.results if not r.confirmed and r.attachment_id == attachment_id]
     catalog = db.query(Marker).all()
+    kept_ids: set[int] = set()
     for idx in range(count):
-        if str(idx) not in selected or idx >= len(pending):
+        if str(idx) not in selected:
             continue
-        row = pending[idx]
-        row.label = form.get(f"label_{idx}") or row.label
-        row.value = float(form.get(f"value_{idx}"))
-        row.unit = normalize_unit(form.get(f"unit_{idx}") or "")
+        value_raw = form.get(f"value_{idx}")
+        if value_raw in (None, ""):
+            continue
+        try:
+            value = float(value_raw)
+        except (TypeError, ValueError):
+            continue
+        label = (form.get(f"label_{idx}") or "").strip()
+        unit = form.get(f"unit_{idx}") or ""
         low = form.get(f"low_{idx}")
         high = form.get(f"high_{idx}")
-        row.lab_ref_low = float(low) if low else None
-        row.lab_ref_high = float(high) if high else None
-        note = (form.get(f"notes_{idx}") or "").strip()
-        row.notes = note or None
+        lab_low = float(low) if low not in (None, "") else None
+        lab_high = float(high) if high not in (None, "") else None
+        notes = (form.get(f"notes_{idx}") or "").strip() or None
+        code_hint = (form.get(f"marker_code_{idx}") or "").strip() or None
         date_raw = (form.get(f"date_{idx}") or "").strip()
+        proposed = None
         if date_raw:
             d = parse_iso_date(date_raw)
-            row.proposed_drawn_on = date_to_datetime(d) if d else row.proposed_drawn_on
-        matched = match_marker(row.label or "", catalog)
-        if matched:
-            row.marker_code = matched.code
-            row.custom_marker_id = None
-            if not row.unit:
-                row.unit = matched.default_unit
-            row.label = matched.name_cs
-        elif row.label:
-            row.marker_code = None
-            existing = (
-                db.query(CustomMarker)
-                .filter(CustomMarker.user_id == user.id, CustomMarker.name == row.label)
-                .first()
-            )
-            if not existing:
-                existing = CustomMarker(user_id=user.id, name=row.label, unit=row.unit or "")
-                db.add(existing)
-                db.flush()
-            row.custom_marker_id = existing.id
-        target = _resolve_target_draw(db, user, draw, row.proposed_drawn_on)
+            proposed = date_to_datetime(d) if d else None
+
+        marker_code, custom_id, result_label, value, unit, lab_low, lab_high = bind_marker_and_units(
+            db,
+            user.id,
+            label=label,
+            value=value,
+            unit=unit,
+            lab_low=lab_low,
+            lab_high=lab_high,
+            catalog=catalog,
+            code_hint=code_hint,
+        )
+        target = _resolve_target_draw(db, user, draw, proposed)
+
+        if idx < len(pending):
+            row = pending[idx]
+            kept_ids.add(row.id)
+        else:
+            row = ResultValue(blood_draw_id=target.id, attachment_id=attachment_id)
+            db.add(row)
+
         row.blood_draw_id = target.id
+        row.marker_code = marker_code
+        row.custom_marker_id = custom_id
+        row.label = result_label
+        row.value = value
+        row.unit = unit
+        row.lab_ref_low = lab_low
+        row.lab_ref_high = lab_high
+        row.notes = notes
         row.confirmed = True
         row.proposed_drawn_on = None
-    for idx, row in enumerate(pending):
-        if str(idx) not in selected:
+
+    for row in pending:
+        if row.id not in kept_ids:
             db.delete(row)
     db.commit()
     return redirect(f"/draws/{draw.id}")
@@ -461,41 +493,43 @@ def add_result(
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    custom_id = None
     code = marker_code or None
     label = None
     if code:
         marker = db.get(Marker, code)
-        if marker and not unit:
+        if not marker:
+            return redirect(f"/draws/{draw_id}")
+        if not unit:
             unit = marker.default_unit
+        label = marker.name_cs
     elif custom_name.strip():
         label = custom_name.strip()
-        existing = (
-            db.query(CustomMarker)
-            .filter(CustomMarker.user_id == user.id, CustomMarker.name == label)
-            .first()
-        )
-        if not existing:
-            existing = CustomMarker(user_id=user.id, name=label, unit=unit or "")
-            db.add(existing)
-            db.flush()
-        custom_id = existing.id
     else:
         return redirect(f"/draws/{draw_id}")
 
-    note = notes.strip() or None
+    bound_code, custom_id, bound_label, value, unit, lab_low, lab_high = bind_marker_and_units(
+        db,
+        user.id,
+        label=label,
+        value=value,
+        unit=unit,
+        lab_low=_parse_float(lab_ref_low),
+        lab_high=_parse_float(lab_ref_high),
+        catalog=db.query(Marker).all(),
+        code_hint=code,
+    )
     db.add(
         ResultValue(
             blood_draw_id=draw.id,
-            marker_code=code,
+            marker_code=bound_code,
             custom_marker_id=custom_id,
             value=value,
             unit=unit,
-            lab_ref_low=_parse_float(lab_ref_low),
-            lab_ref_high=_parse_float(lab_ref_high),
+            lab_ref_low=lab_low,
+            lab_ref_high=lab_high,
             confirmed=True,
-            label=label,
-            notes=note,
+            label=bound_label,
+            notes=notes.strip() or None,
         )
     )
     db.commit()

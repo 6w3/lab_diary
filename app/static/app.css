@@ -84,6 +84,7 @@ button:hover, .btn:hover { background: var(--accent-hover); }
 button.danger, .danger { background: var(--danger); color: #fff; }
 button.link { background: none; color: var(--danger); border: none; padding: 0; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .list { list-style: none; padding: 0; }
 .list li { padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
 .muted { color: var(--muted); }

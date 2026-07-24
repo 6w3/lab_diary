@@ -2,47 +2,130 @@
 {% block title %}{{ t('trends_title') }}{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  .wrap-trends { max-width: 1100px; }
+  .chart-grid { display: grid; gap: 1.25rem; }
+  .chart-card { border: 1px solid var(--border); padding: 0.85rem 1rem 0.5rem; }
+  .chart-card h3 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+  .chart-card .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
+  .chart-card canvas { max-height: 220px; }
+  .cat-heading { margin: 1.75rem 0 0.75rem; font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+</style>
 {% endblock %}
 {% block content %}
+<div class="wrap-trends">
 <h1>{{ t('trends_title') }}</h1>
-<form method="get" action="/trends" class="card">
-  <label>{{ t('select_marker') }}
-    <select name="marker" onchange="this.form.submit()">
-      <option value="">—</option>
-      {% for m in markers %}
-        <option value="{{ m.code }}" {% if selected == m.code %}selected{% endif %}>
-          {{ m.name_cs if locale == 'cs' else m.name_en }}
-        </option>
+{% if not has_charts %}
+  <p>{{ t('trends_empty') }}</p>
+{% else %}
+  <p class="muted">{{ t('trends_all_hint') }}</p>
+  {% for group in chart_groups %}
+    <h2 class="cat-heading">{{ group.category_label }}</h2>
+    <div class="chart-grid">
+      {% for c in group.charts %}
+        <div class="chart-card">
+          <h3>{{ c.name }} <span class="meta">({{ c.unit }})</span></h3>
+          <canvas data-key="{{ c.key }}" height="160"></canvas>
+        </div>
       {% endfor %}
-      {% for cm in custom_markers %}
-        <option value="custom:{{ cm.id }}" {% if selected == 'custom:' ~ cm.id %}selected{% endif %}>
-          {{ cm.name }} ({{ t('custom_marker') }})
-        </option>
-      {% endfor %}
-    </select>
-  </label>
-</form>
-
-{% if has_chart %}
-<canvas id="trendChart" height="120"></canvas>
+    </div>
+  {% endfor %}
+{% endif %}
+</div>
+{% if has_charts %}
 <script>
-const ctx = document.getElementById('trendChart');
-new Chart(ctx, {
-  type: 'line',
-  data: {
-    labels: {{ chart_labels_json | safe }},
-    datasets: [{
-      label: {{ chart_label_json | safe }},
-      data: {{ chart_values_json | safe }},
-      borderColor: '#1f5c4a',
-      tension: 0.2
-    }]
-  },
-  options: {
-    scales: {
-      y: { beginAtZero: false }
+const charts = {{ charts_json | safe }};
+const byKey = Object.fromEntries(charts.map(c => [c.key, c]));
+
+function refPlugin(tipLow, tipHigh, labLow, labHigh) {
+  return {
+    id: 'refBands',
+    beforeDraw(chart) {
+      const {ctx, chartArea, scales} = chart;
+      if (!chartArea || !scales.y) return;
+      const y = scales.y;
+      const drawBand = (lo, hi, color) => {
+        if (lo == null && hi == null) return;
+        const top = hi != null ? y.getPixelForValue(hi) : chartArea.top;
+        const bottom = lo != null ? y.getPixelForValue(lo) : chartArea.bottom;
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.fillRect(chartArea.left, Math.min(top, bottom), chartArea.right - chartArea.left, Math.abs(bottom - top));
+        ctx.restore();
+      };
+      drawBand(tipLow, tipHigh, 'rgba(31, 92, 74, 0.08)');
+      drawBand(labLow, labHigh, 'rgba(236, 87, 79, 0.06)');
+    }
+  };
+}
+
+document.querySelectorAll('canvas[data-key]').forEach((el) => {
+  const c = byKey[el.dataset.key];
+  if (!c) return;
+  const datasets = [{
+    label: c.name,
+    data: c.values,
+    borderColor: '#1f5c4a',
+    backgroundColor: 'rgba(31,92,74,0.15)',
+    tension: 0.2,
+    pointRadius: 3,
+  }];
+  if (c.tip_low != null || c.tip_high != null) {
+    if (c.tip_low != null) {
+      datasets.push({
+        label: 'tip low',
+        data: c.labels.map(() => c.tip_low),
+        borderColor: 'rgba(31,92,74,0.45)',
+        borderDash: [4, 4],
+        pointRadius: 0,
+        fill: false,
+      });
+    }
+    if (c.tip_high != null) {
+      datasets.push({
+        label: 'tip high',
+        data: c.labels.map(() => c.tip_high),
+        borderColor: 'rgba(31,92,74,0.45)',
+        borderDash: [4, 4],
+        pointRadius: 0,
+        fill: false,
+      });
     }
   }
+  if (c.lab_low != null) {
+    datasets.push({
+      label: 'lab low',
+      data: c.labels.map(() => c.lab_low),
+      borderColor: 'rgba(236,87,79,0.5)',
+      borderDash: [2, 3],
+      pointRadius: 0,
+      fill: false,
+    });
+  }
+  if (c.lab_high != null) {
+    datasets.push({
+      label: 'lab high',
+      data: c.labels.map(() => c.lab_high),
+      borderColor: 'rgba(236,87,79,0.5)',
+      borderDash: [2, 3],
+      pointRadius: 0,
+      fill: false,
+    });
+  }
+  new Chart(el, {
+    type: 'line',
+    data: { labels: c.labels, datasets },
+    options: {
+      plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false },
+      },
+      scales: {
+        y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } }
+      }
+    },
+    plugins: [refPlugin(c.tip_low, c.tip_high, c.lab_low, c.lab_high)],
+  });
 });
 </script>
 {% endif %}

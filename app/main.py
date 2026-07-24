@@ -14,7 +14,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.deps import LocaleDep, OptionalUserDep, redirect, template_context
 from app.models import User
-from app.routers import account, auth, draws, oauth, trends
+from app.routers import account, auth, draws, imports, oauth, trends
 from app.services.markers import seed_markers
 from app.services.storage import ensure_upload_dir
 
@@ -28,6 +28,7 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.include_router(auth.router)
 app.include_router(oauth.router)
+app.include_router(imports.router)
 app.include_router(draws.router)
 app.include_router(trends.router)
 app.include_router(account.router)

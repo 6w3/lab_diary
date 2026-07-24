@@ -53,6 +53,52 @@ MARKER_SEED: list[dict] = [
     {"code": "homocysteine", "name_cs": "Homocystein", "name_en": "Homocysteine", "default_unit": "umol/l", "tip_ref_low": None, "tip_ref_high": 12},
 ]
 
+# Display order for trends / multi-chart pages (category → marker codes).
+MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
+    ("hematology", ["hgb", "hct", "mcv", "wbc", "plt"]),
+    ("iron", ["ferritin", "iron"]),
+    ("vitamins", ["vitamin_d", "b12", "folate"]),
+    ("thyroid", ["tsh", "ft4", "ft3"]),
+    ("hormones", ["testosterone", "cortisol"]),
+    ("glucose", ["glucose", "hba1c", "insulin"]),
+    ("lipids", ["apob", "ldl", "hdl", "triglycerides", "lpa"]),
+    ("inflammation", ["crp", "homocysteine"]),
+    ("liver_muscle", ["ck", "alt", "ast", "ggt"]),
+    ("kidney", ["creatinine", "urea", "uric_acid", "egfr"]),
+    ("electrolytes", ["sodium", "potassium", "chloride", "calcium", "magnesium", "osmolality"]),
+]
+
+MARKER_CATEGORY_LABELS = {
+    "hematology": {"cs": "Hematologie", "en": "Hematology"},
+    "iron": {"cs": "Železo", "en": "Iron"},
+    "vitamins": {"cs": "Vitamíny", "en": "Vitamins"},
+    "thyroid": {"cs": "Štítná žláza", "en": "Thyroid"},
+    "hormones": {"cs": "Hormony", "en": "Hormones"},
+    "glucose": {"cs": "Glukóza / metabolismus", "en": "Glucose / metabolism"},
+    "lipids": {"cs": "Lipidy", "en": "Lipids"},
+    "inflammation": {"cs": "Zánět", "en": "Inflammation"},
+    "liver_muscle": {"cs": "Játra / svaly", "en": "Liver / muscle"},
+    "kidney": {"cs": "Ledviny", "en": "Kidney"},
+    "electrolytes": {"cs": "Elektrolyty", "en": "Electrolytes"},
+    "other": {"cs": "Ostatní", "en": "Other"},
+    "custom": {"cs": "Vlastní", "en": "Custom"},
+}
+
+
+def marker_sort_key(code: str) -> tuple[int, int, str]:
+    for cat_i, (_cat, codes) in enumerate(MARKER_CATEGORY_ORDER):
+        if code in codes:
+            return (cat_i, codes.index(code), code)
+    return (len(MARKER_CATEGORY_ORDER), 0, code)
+
+
+def marker_category(code: str) -> str:
+    for cat, codes in MARKER_CATEGORY_ORDER:
+        if code in codes:
+            return cat
+    return "other"
+
+
 # Extra OCR aliases → marker code (lowercased, stripped tokens).
 MARKER_ALIASES: dict[str, str] = {
     "na": "sodium",

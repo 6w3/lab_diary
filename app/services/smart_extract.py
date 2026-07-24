@@ -28,9 +28,10 @@ Return ONLY valid JSON (no markdown) with this shape:
       "lab_name": null,
       "results": [
         {
-          "label": "marker name",
+          "marker_code": "ferritin",
+          "label": "Feritin",
           "value": 0.0,
-          "unit": "ukat/l",
+          "unit": "ug/l",
           "ref_low": null,
           "ref_high": null,
           "confidence": 0.0
@@ -46,7 +47,8 @@ Rules:
 - Dates on Czech lab reports are day-first: D.M.YYYY or DD.MM.YYYY (example: 12.01.2025 = 12 January 2025 = 2025-01-12). Never treat them as US month-first.
 - Prefer ISO dates YYYY-MM-DD in output.
 - Numbers as JSON numbers (dot decimal). Do not invent values you cannot read.
-- Keep original marker names; do not translate units incorrectly.
+- When a known catalog code matches, set marker_code exactly (e.g. hgb, ferritin, vitamin_d, tsh, glucose). Otherwise omit marker_code and keep the original label.
+- Keep original units from the report; do not invent conversions.
 """
 
 
@@ -110,6 +112,7 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
             label = str(r.get("label") or "").strip()
             if len(label) < 2:
                 continue
+            marker_code = str(r.get("marker_code") or "").strip() or None
             ref_low = r.get("ref_low", r.get("lab_ref_low"))
             ref_high = r.get("ref_high", r.get("lab_ref_high"))
             try:
@@ -122,6 +125,7 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
                 ref_high_f = None
             results_out.append(
                 {
+                    "marker_code": marker_code,
                     "label": label,
                     "value": value,
                     "unit": str(r.get("unit") or ""),
@@ -161,8 +165,10 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
             content.append(
                 {
                     "type": "text",
-                    "text": "Known markers (prefer these labels when matching): "
-                    + ", ".join(marker_hints[:80]),
+                    "text": (
+                        "Catalog marker codes (use marker_code when matching): "
+                        + ", ".join(marker_hints[:120])
+                    ),
                 }
             )
         for p in pages:

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ t('upload_report') }} — {{ t('app_name') }}{% endblock %}
+{% block content %}
+<h1>{{ t('upload_report') }}</h1>
+<p class="muted">{{ t('upload_first_hint') }}</p>
+<form method="post" action="/import" enctype="multipart/form-data" class="card">
+  <label>{{ t('lab_name') }}
+    <input type="text" name="lab_name" placeholder="{{ t('optional') }}">
+  </label>
+  <label>{{ t('upload') }}
+    <input type="file" name="files" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
+  </label>
+  <fieldset class="extract-mode">
+    <legend>{{ t('extract_mode') }}</legend>
+    {% if smart_available %}
+    <label class="check">
+      <input type="radio" name="extract_mode" value="smart" {% if default_smart %}checked{% endif %}> {{ t('extract_smart') }}
+    </label>
+    <label class="check smart-consent">
+      <input type="checkbox" name="smart_consent" value="1" {% if default_smart %}checked{% endif %}> {{ t('smart_consent') }}
+    </label>
+    {% endif %}
+    <label class="check">
+      <input type="radio" name="extract_mode" value="classic" {% if not default_smart %}checked{% endif %}> {{ t('extract_classic') }}
+    </label>
+  </fieldset>
+  <button type="submit">{{ t('read_report') }}</button>
+</form>
+<p><a href="/draws/new">{{ t('manual_entry') }}</a></p>
+{% endblock %}

@@ -37,17 +37,17 @@
     <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
     <fieldset class="extract-mode">
       <legend>{{ t('extract_mode') }}</legend>
-      <label class="check">
-        <input type="radio" name="extract_mode" value="classic" checked> {{ t('extract_classic') }}
-      </label>
       {% if smart_available %}
       <label class="check">
-        <input type="radio" name="extract_mode" value="smart"> {{ t('extract_smart') }}
+        <input type="radio" name="extract_mode" value="smart" checked> {{ t('extract_smart') }}
       </label>
       <label class="check smart-consent">
-        <input type="checkbox" name="smart_consent" value="1"> {{ t('smart_consent') }}
+        <input type="checkbox" name="smart_consent" value="1" checked> {{ t('smart_consent') }}
       </label>
       {% endif %}
+      <label class="check">
+        <input type="radio" name="extract_mode" value="classic" {% if not smart_available %}checked{% endif %}> {{ t('extract_classic') }}
+      </label>
     </fieldset>
     <button type="submit">{{ t('upload') }}</button>
   </form>

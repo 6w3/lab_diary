@@ -31,15 +31,13 @@ def ensure_upload_dir() -> Path:
     return path
 
 
-def save_upload(file: UploadFile, user_id: int, draw_id: int) -> tuple[str, str, str]:
-    ensure_upload_dir()
+def _store_upload(file: UploadFile, dest_dir: Path) -> tuple[str, str, str]:
     original = file.filename or "upload.bin"
     suffix = Path(original).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {suffix}")
 
     content_type = file.content_type or "application/octet-stream"
-    dest_dir = ensure_upload_dir() / str(user_id) / str(draw_id)
     dest_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid.uuid4().hex}{suffix}"
     dest = dest_dir / stored_name
@@ -63,6 +61,18 @@ def save_upload(file: UploadFile, user_id: int, draw_id: int) -> tuple[str, str,
             pass
 
     return stored_name, content_type, str(dest)
+
+
+def save_upload(file: UploadFile, user_id: int, draw_id: int) -> tuple[str, str, str]:
+    ensure_upload_dir()
+    dest_dir = ensure_upload_dir() / str(user_id) / str(draw_id)
+    return _store_upload(file, dest_dir)
+
+
+def save_import_upload(file: UploadFile, user_id: int, job_id: int) -> tuple[str, str, str]:
+    ensure_upload_dir()
+    dest_dir = ensure_upload_dir() / str(user_id) / "imports" / str(job_id)
+    return _store_upload(file, dest_dir)
 
 
 def delete_file(storage_path: str) -> None:

@@ -30,6 +30,7 @@ class User(Base):
     blood_draws: Mapped[list["BloodDraw"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     custom_markers: Mapped[list["CustomMarker"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     email_tokens: Mapped[list["EmailToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    import_jobs: Mapped[list["ImportJob"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class OAuthAccount(Base):
@@ -97,11 +98,34 @@ class DrawConditions(Base):
     blood_draw: Mapped[BloodDraw] = relationship(back_populates="conditions")
 
 
+class ImportJob(Base):
+    __tablename__ = "import_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="review")  # review|confirmed|failed|cancelled
+    extract_mode: Mapped[str] = mapped_column(String(32), default="smart")
+    filename: Mapped[str] = mapped_column(String(255))
+    content_type: Mapped[str] = mapped_column(String(128))
+    storage_path: Mapped[str] = mapped_column(String(512))
+    ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    proposals_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="import_jobs")
+    attachments: Mapped[list["Attachment"]] = relationship(back_populates="import_job")
+
+
 class Attachment(Base):
     __tablename__ = "attachments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    blood_draw_id: Mapped[int] = mapped_column(ForeignKey("blood_draws.id", ondelete="CASCADE"), index=True)
+    blood_draw_id: Mapped[int | None] = mapped_column(
+        ForeignKey("blood_draws.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    import_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("import_jobs.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(128))
     storage_path: Mapped[str] = mapped_column(String(512))
@@ -109,7 +133,8 @@ class Attachment(Base):
     ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    blood_draw: Mapped[BloodDraw] = relationship(back_populates="attachments")
+    blood_draw: Mapped[BloodDraw | None] = relationship(back_populates="attachments")
+    import_job: Mapped[ImportJob | None] = relationship(back_populates="attachments")
 
 
 class Marker(Base):
