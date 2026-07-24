@@ -13,6 +13,9 @@
 <p><strong>{{ t('lab_name') }}:</strong> {{ draw.lab_name }}
   {% if draw.workplace %} / {{ draw.workplace }}{% endif %}
 </p>
+{% if not draw.conditions %}
+  <p class="flash">{{ t('missing_conditions') }} — <a href="/draws/{{ draw.id }}/edit">{{ t('conditions') }}</a></p>
+{% endif %}
 
 {% if draw.conditions %}
 <section class="card">
@@ -33,31 +36,13 @@
 
 <section class="card">
   <h2>{{ t('attachments') }}</h2>
-  <form method="post" action="/draws/{{ draw.id }}/upload" enctype="multipart/form-data">
-    <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
-    <fieldset class="extract-mode">
-      <legend>{{ t('extract_mode') }}</legend>
-      {% if smart_available %}
-      <label class="check">
-        <input type="radio" name="extract_mode" value="smart" checked> {{ t('extract_smart') }}
-      </label>
-      <label class="check smart-consent">
-        <input type="checkbox" name="smart_consent" value="1" checked> {{ t('smart_consent') }}
-      </label>
-      {% endif %}
-      <label class="check">
-        <input type="radio" name="extract_mode" value="classic" {% if not smart_available %}checked{% endif %}> {{ t('extract_classic') }}
-      </label>
-    </fieldset>
-    <button type="submit">{{ t('upload') }}</button>
-  </form>
+  <p><a class="btn" href="/import">{{ t('upload_report') }}</a></p>
+  <p class="muted">{{ t('upload_extends_hint') }}</p>
   <ul>
-    {% for a in draw.attachments %}
-      <li>{{ a.filename }} — {{ a.ocr_status }}
-        {% if a.ocr_status == 'done' %}
-          <a href="/draws/{{ draw.id }}/ocr/{{ a.id }}">{{ t('ocr_review') }}</a>
-        {% endif %}
-      </li>
+    {% for a in linked_attachments %}
+      <li>{{ a.filename }} — {{ a.ocr_status }}</li>
+    {% else %}
+      <li class="muted">—</li>
     {% endfor %}
   </ul>
 </section>
@@ -67,6 +52,7 @@
   <table>
     <thead>
       <tr>
+        <th></th>
         <th>{{ t('marker') }}</th>
         <th>{{ t('value') }}</th>
         <th>{{ t('unit') }}</th>
@@ -79,6 +65,7 @@
     <tbody>
       {% for r in confirmed_results %}
         <tr>
+          <td><input type="checkbox" name="split_ids" value="{{ r.id }}" form="split-form"></td>
           <td>{{ r.display_name }}</td>
           <td>{{ r.value }}</td>
           <td>{{ r.unit }}</td>
@@ -99,6 +86,12 @@
       {% endfor %}
     </tbody>
   </table>
+  <form method="post" action="/draws/{{ draw.id }}/split" id="split-form">
+    <p>
+      <button type="submit" class="secondary">{{ t('split_selected') }}</button>
+      <span class="muted">{{ t('split_selected_hint') }}</span>
+    </p>
+  </form>
 
   <h3>{{ t('add_result') }}</h3>
   <form method="post" action="/draws/{{ draw.id }}/results" class="inline-form">

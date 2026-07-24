@@ -18,6 +18,9 @@
           <strong>{{ d.drawn_at.strftime('%Y-%m-%d') }}</strong>
           — {{ d.lab_name }}
         </a>
+        {% if d.missing_conditions %}
+          <span class="muted"> · {{ t('missing_conditions') }}</span>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>

@@ -3,22 +3,21 @@ from __future__ import annotations
 from datetime import date, datetime
 from types import SimpleNamespace
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
-from app.services.label_aliases import load_user_aliases
-from app.services.markers import resolve_marker
-from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
-from app.services.ocr_extract import extract_document
-from app.services.ocr_parse import normalize_unit
+from app.services.draw_organize import (
+    apply_draw_conditions,
+    attachments_for_draw,
+    create_draw as create_blood_draw,
+)
+from app.services.multi_date import unique_drawn_dates
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
 from app.services.result_bind import bind_marker_and_units
-from app.services.smart_extract import run_smart_extract, smart_enabled
-from app.services.storage import save_upload
+from app.services.smart_extract import smart_enabled
 from app.services.units import UNIT_CHOICES, unit_options_for_marker
 
 router = APIRouter(prefix="/draws", tags=["draws"])
@@ -62,17 +61,7 @@ def _get_owned_draw(db, user_id: int, draw_id: int) -> BloodDraw | None:
 
 
 def _apply_conditions(draw: BloodDraw, form: dict) -> DrawConditions:
-    c = draw.conditions or DrawConditions(blood_draw_id=draw.id)
-    c.fasting = _parse_bool(form.get("fasting"))
-    c.weight_kg = _parse_float(form.get("weight_kg"))
-    c.last_hard_training = form.get("last_hard_training") or None
-    c.sleep_score = _parse_int(form.get("sleep_score"))
-    c.cycle_day = form.get("cycle_day") or None
-    c.contraception = _parse_bool(form.get("contraception"))
-    c.illness_14d = _parse_bool(form.get("illness_14d"))
-    c.supplements = form.get("supplements") or None
-    c.notes = form.get("notes") or None
-    return c
+    return apply_draw_conditions(draw, form)
 
 
 def _display_results(draw: BloodDraw, locale: str):
@@ -112,10 +101,19 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         .order_by(BloodDraw.drawn_at.desc())
         .all()
     )
+    draw_rows = [
+        SimpleNamespace(
+            id=d.id,
+            drawn_at=d.drawn_at,
+            lab_name=d.lab_name,
+            missing_conditions=d.conditions is None,
+        )
+        for d in draws
+    ]
     return templates.TemplateResponse(
         request,
         "draws/list.html",
-        template_context(request, locale, draws=draws),
+        template_context(request, locale, draws=draw_rows),
     )
 
 
@@ -171,6 +169,7 @@ def draw_detail(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, d
             draw=draw,
             markers=markers,
             confirmed_results=_display_results(draw, locale),
+            linked_attachments=attachments_for_draw(draw),
             smart_available=smart_enabled(),
         ),
     )
@@ -227,107 +226,49 @@ async def upload_files(
     db: DbDep,
     user: UserDep,
     draw_id: int,
-    files: list[UploadFile] = File(...),
-    extract_mode: str = Form("smart"),
-    smart_consent: str = Form(""),
 ):
+    """Deprecated: uploads are import-first and organize into draws automatically."""
+    _ = (db, user, draw_id, request)
+    return redirect("/import")
+
+
+@router.post("/{draw_id}/split")
+async def split_results(request: Request, db: DbDep, user: UserDep, draw_id: int):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    mode = (extract_mode or "smart").lower()
-    if mode == "smart":
-        if not smart_enabled():
-            mode = "classic"
-        elif smart_consent not in {"1", "on", "true", "yes"}:
-            request.session["flash"] = "Pro Smart AI je potřeba souhlas s odesláním reportu na NVIDIA."
-            return redirect(f"/draws/{draw_id}")
+    form = await request.form()
+    selected = set(form.getlist("split_ids"))
+    if not selected:
+        request.session["flash"] = "Vyber výsledky k oddělení."
+        return redirect(f"/draws/{draw_id}")
 
-    existing = len(draw.attachments)
-    settings = get_settings()
-    catalog = db.query(Marker).all()
-    marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
-    user_aliases = load_user_aliases(db, user.id)
-    last_att_id = None
-
-    def _proposal_dt(p: dict) -> datetime | None:
-        raw = p.get("proposed_drawn_on")
-        if not raw:
-            return None
-        d = parse_iso_date(str(raw))
-        return date_to_datetime(d) if d else None
-
-    for file in files:
-        if existing >= settings.max_attachments_per_draw:
-            break
+    new_draw = create_blood_draw(
+        db,
+        user.id,
+        drawn_at=draw.drawn_at,
+        lab_name=draw.lab_name,
+        workplace=draw.workplace,
+    )
+    moved = 0
+    for raw_id in selected:
         try:
-            filename, content_type, storage_path = save_upload(file, user.id, draw.id)
-        except ValueError:
+            rid = int(raw_id)
+        except (TypeError, ValueError):
             continue
-        att = Attachment(
-            blood_draw_id=draw.id,
-            filename=filename,
-            content_type=content_type,
-            storage_path=storage_path,
-            ocr_status="pending",
-        )
-        db.add(att)
-        db.flush()
-        last_att_id = att.id
-        try:
-            if mode == "smart":
-                raw, proposals, _meta = run_smart_extract(storage_path, marker_hints=marker_hints)
-                proposals, raw, _merge = prefer_multi_date_proposals(storage_path, proposals, raw)
-            else:
-                raw, proposals, _meta = extract_document(storage_path)
-            att.ocr_raw_text = raw
-            att.ocr_status = "done"
-            for p in proposals:
-                code_hint = (p.get("marker_code") or "").strip() or None
-                source_label = (p.get("label") or "").strip()
-                matched = resolve_marker(
-                    source_label,
-                    catalog,
-                    code_hint=code_hint,
-                    user_aliases=user_aliases,
-                )
-                label = source_label or (matched.name_cs if matched else None)
-                unit = normalize_unit(p.get("unit") or "")
-                if matched and not unit:
-                    unit = matched.default_unit
-                db.add(
-                    ResultValue(
-                        blood_draw_id=draw.id,
-                        attachment_id=att.id,
-                        marker_code=matched.code if matched else None,
-                        value=p["value"],
-                        unit=unit,
-                        lab_ref_low=p.get("lab_ref_low"),
-                        lab_ref_high=p.get("lab_ref_high"),
-                        confirmed=False,
-                        label=label,
-                        proposed_drawn_on=_proposal_dt(p),
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001
-            att.ocr_status = "failed"
-            att.ocr_raw_text = str(exc)
-            if mode == "smart":
-                request.session["flash"] = f"Smart AI selhalo ({exc}). Zkus Classic režim."
-        existing += 1
+        row = db.get(ResultValue, rid)
+        if row and row.blood_draw_id == draw.id and row.confirmed:
+            row.blood_draw_id = new_draw.id
+            moved += 1
+    if moved == 0:
+        db.delete(new_draw)
+        db.commit()
+        request.session["flash"] = "Nic k oddělení."
+        return redirect(f"/draws/{draw_id}")
     db.commit()
-    if last_att_id:
-        pending = (
-            db.query(ResultValue)
-            .filter(
-                ResultValue.blood_draw_id == draw.id,
-                ResultValue.attachment_id == last_att_id,
-                ResultValue.confirmed.is_(False),
-            )
-            .count()
-        )
-        if pending:
-            return redirect(f"/draws/{draw.id}/ocr/{last_att_id}")
-    return redirect(f"/draws/{draw.id}")
+    request.session["flash"] = f"Odděleno {moved} výsledků do nového odběru."
+    request.session["conditions_queue"] = [{"id": new_draw.id, "is_new": True}]
+    return redirect("/import/conditions")
 
 
 @router.get("/{draw_id}/ocr/{attachment_id}", response_class=HTMLResponse)

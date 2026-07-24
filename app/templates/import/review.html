@@ -33,15 +33,47 @@
     <tbody id="review-body">
       {% set ns = namespace(idx=0) %}
       {% for g in groups %}
-        {% if multi_date or groups|length > 1 %}
         <tr class="date-group">
-          <td colspan="8"><strong>{{ t('drawn_at') }}: {{ g.date or '—' }}</strong></td>
+          <td colspan="8">
+            <strong>{{ t('drawn_at') }}: {{ g.date or '—' }}</strong>
+            {% if g.candidates %}
+              <div class="merge-choice">
+                <p class="muted">{{ t('existing_draw_hint') }}</p>
+                {% if g.candidates|length == 1 %}
+                  <label class="check">
+                    <input type="radio" name="merge_{{ g.date }}" value="existing:{{ g.candidates[0].id }}"
+                      {% if g.default_choice.startswith('existing:') %}checked{% endif %}>
+                    {{ t('merge_into_existing') }} — {{ g.candidates[0].label }}
+                  </label>
+                  <label class="check">
+                    <input type="radio" name="merge_{{ g.date }}" value="new"
+                      {% if g.default_choice == 'new' %}checked{% endif %}>
+                    {{ t('different_draw') }}
+                  </label>
+                {% else %}
+                  <p class="muted">{{ t('pick_existing_or_new') }}</p>
+                  {% for c in g.candidates %}
+                    <label class="check">
+                      <input type="radio" name="merge_{{ g.date }}" value="existing:{{ c.id }}" required>
+                      {{ t('merge_into_existing') }} — {{ c.label }}
+                    </label>
+                  {% endfor %}
+                  <label class="check">
+                    <input type="radio" name="merge_{{ g.date }}" value="new" required>
+                    {{ t('different_draw') }}
+                  </label>
+                {% endif %}
+              </div>
+            {% else %}
+              <input type="hidden" name="merge_{{ g.date }}" value="new">
+            {% endif %}
+          </td>
         </tr>
-        {% endif %}
         {% for r in g.rows %}
         <tr>
           <td><input type="checkbox" name="selected" value="{{ ns.idx }}" checked></td>
           <td>
+            <input type="hidden" name="attachment_id_{{ ns.idx }}" value="{{ r.attachment_id or '' }}">
             <input type="text" name="label_{{ ns.idx }}" value="{{ r.label }}" placeholder="{{ t('source_label') }}">
           </td>
           <td>
@@ -92,6 +124,7 @@
   <tr>
     <td><input type="checkbox" name="selected" value="__IDX__" checked></td>
     <td>
+      <input type="hidden" name="attachment_id___IDX__" value="">
       <input type="text" name="label___IDX__" value="" placeholder="{{ t('source_label') }}">
     </td>
     <td>

@@ -34,6 +34,27 @@ def _series_point(result: ResultValue, draw: BloodDraw, marker: Marker | None) -
                 hv, _, hok = to_canonical(lab_high, result.unit, marker.code, marker.default_unit)
                 if hok:
                     lab_high = hv
+    conditions: dict = {}
+    c = draw.conditions
+    if c:
+        if c.fasting is not None:
+            conditions["fasting"] = c.fasting
+        if c.weight_kg is not None:
+            conditions["weight_kg"] = c.weight_kg
+        if c.sleep_score is not None:
+            conditions["sleep_score"] = c.sleep_score
+        if c.last_hard_training:
+            conditions["last_hard_training"] = c.last_hard_training
+        if c.illness_14d is not None:
+            conditions["illness_14d"] = c.illness_14d
+        if c.supplements:
+            conditions["supplements"] = c.supplements
+        if c.notes:
+            conditions["notes"] = c.notes
+        if c.cycle_day:
+            conditions["cycle_day"] = c.cycle_day
+        if c.contraception is not None:
+            conditions["contraception"] = c.contraception
     return {
         "date": draw.drawn_at.strftime("%Y-%m-%d"),
         "value": value,
@@ -42,6 +63,9 @@ def _series_point(result: ResultValue, draw: BloodDraw, marker: Marker | None) -
         "lab_high": lab_high,
         "tip_low": tip_low,
         "tip_high": tip_high,
+        "lab_name": draw.lab_name,
+        "draw_id": draw.id,
+        "conditions": conditions,
     }
 
 
@@ -116,6 +140,7 @@ def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
                 "category_label": meta["category_label"],
                 "labels": labels,
                 "values": values,
+                "points": points,
                 "lab_low": lab_low,
                 "lab_high": lab_high,
                 "tip_low": tip_low,

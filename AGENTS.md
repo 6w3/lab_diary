@@ -38,9 +38,11 @@ When user asks to ship lab diary changes:
 
 Persistence on VPS: DB `/vps/data/lab_diary_db`, uploads `/vps/data/lab_diary_uploads`.
 
-## Multi-date reports
+## Multi-date / import-first
 
 Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). Prefer classic multi-date table parse when it finds **more** dates than Smart.
+
+Upload is **import-first** (`/import`): one batch can create/extend multiple draws. Never silent-merge by day+lab — review asks merge vs new draw. Files link via `draw_attachments` M2M. Dedup identical results on confirm. Conditions wizard after confirm (create new / edit existing). Split selected results on draw detail if merged by mistake.
 
 Smart extract:
 - Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).

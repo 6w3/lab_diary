@@ -36,6 +36,33 @@
 <script>
 const charts = {{ charts_json | safe }};
 const byKey = Object.fromEntries(charts.map(c => [c.key, c]));
+const condLabels = {
+  fasting: "{{ t('fasting')|e }}",
+  weight_kg: "{{ t('weight_kg')|e }}",
+  sleep_score: "{{ t('sleep_score')|e }}",
+  last_hard_training: "{{ t('last_hard_training')|e }}",
+  illness_14d: "{{ t('illness_14d')|e }}",
+  supplements: "{{ t('supplements')|e }}",
+  notes: "{{ t('notes')|e }}",
+  cycle_day: "{{ t('cycle_day')|e }}",
+  contraception: "{{ t('contraception')|e }}",
+  yes: "{{ t('yes')|e }}",
+  no: "{{ t('no')|e }}",
+};
+
+function formatConditions(point) {
+  if (!point) return [];
+  const lines = [];
+  if (point.lab_name) lines.push(point.lab_name);
+  const c = point.conditions || {};
+  for (const [k, v] of Object.entries(c)) {
+    const label = condLabels[k] || k;
+    let val = v;
+    if (typeof v === 'boolean') val = v ? condLabels.yes : condLabels.no;
+    lines.push(label + ': ' + val);
+  }
+  return lines;
+}
 
 function refPlugin(tipLow, tipHigh, labLow, labHigh) {
   return {
@@ -118,7 +145,18 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     options: {
       plugins: {
         legend: { display: false },
-        tooltip: { mode: 'index', intersect: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          filter: (item) => item.datasetIndex === 0,
+          callbacks: {
+            afterBody(items) {
+              if (!items.length) return [];
+              const idx = items[0].dataIndex;
+              return formatConditions((c.points || [])[idx]);
+            }
+          }
+        },
       },
       scales: {
         y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } }

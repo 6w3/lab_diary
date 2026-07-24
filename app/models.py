@@ -76,6 +76,9 @@ class BloodDraw(Base):
     attachments: Mapped[list["Attachment"]] = relationship(
         back_populates="blood_draw", cascade="all, delete-orphan"
     )
+    draw_attachments: Mapped[list["DrawAttachment"]] = relationship(
+        back_populates="blood_draw", cascade="all, delete-orphan"
+    )
     results: Mapped[list["ResultValue"]] = relationship(
         back_populates="blood_draw", cascade="all, delete-orphan"
     )
@@ -136,6 +139,27 @@ class Attachment(Base):
 
     blood_draw: Mapped[BloodDraw | None] = relationship(back_populates="attachments")
     import_job: Mapped[ImportJob | None] = relationship(back_populates="attachments")
+    draw_links: Mapped[list["DrawAttachment"]] = relationship(
+        back_populates="attachment", cascade="all, delete-orphan"
+    )
+
+
+class DrawAttachment(Base):
+    """Many-to-many: one file can belong to many draws; one draw can have many files."""
+
+    __tablename__ = "draw_attachments"
+    __table_args__ = (UniqueConstraint("blood_draw_id", "attachment_id", name="uq_draw_attachment_pair"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blood_draw_id: Mapped[int] = mapped_column(
+        ForeignKey("blood_draws.id", ondelete="CASCADE"), index=True
+    )
+    attachment_id: Mapped[int] = mapped_column(
+        ForeignKey("attachments.id", ondelete="CASCADE"), index=True
+    )
+
+    blood_draw: Mapped[BloodDraw] = relationship(back_populates="draw_attachments")
+    attachment: Mapped[Attachment] = relationship(back_populates="draw_links")
 
 
 class Marker(Base):
