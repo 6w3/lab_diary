@@ -11,8 +11,12 @@ UNIT_CHOICES: list[str] = [
     "%",
     "fl",
     "10^9/l",
+    "10^12/l",
     "ug/l",
+    "ug/dl",
     "ng/ml",
+    "ng/dl",
+    "pg/ml",
     "umol/l",
     "nmol/l",
     "pmol/l",
@@ -71,6 +75,21 @@ _MARKER_FACTORS: dict[tuple[str, str, str], float] = {
     # Cortisol nmol/L ↔ ug/dL (÷27.59)
     ("cortisol", "nmol/l", "ug/dl"): 1.0 / 27.59,
     ("cortisol", "ug/dl", "nmol/l"): 27.59,
+    # Iron: umol/L ↔ ug/dL (×5.586)
+    ("iron", "umol/l", "ug/dl"): 5.586,
+    ("iron", "ug/dl", "umol/l"): 1.0 / 5.586,
+    # Uric acid: umol/L ↔ mg/dL (÷59.48)
+    ("uric_acid", "umol/l", "mg/dl"): 1.0 / 59.48,
+    ("uric_acid", "mg/dl", "umol/l"): 59.48,
+    # Urea (not BUN): mmol/L ↔ mg/dL (×6.006)
+    ("urea", "mmol/l", "mg/dl"): 6.006,
+    ("urea", "mg/dl", "mmol/l"): 1.0 / 6.006,
+    # Calcium: mmol/L ↔ mg/dL (×4.008)
+    ("calcium", "mmol/l", "mg/dl"): 4.008,
+    ("calcium", "mg/dl", "mmol/l"): 1.0 / 4.008,
+    # Magnesium: mmol/L ↔ mg/dL (×2.43)
+    ("magnesium", "mmol/l", "mg/dl"): 2.43,
+    ("magnesium", "mg/dl", "mmol/l"): 1.0 / 2.43,
     # HbA1c mmol/mol ↔ % (NGSP): % = 0.09148*IFCC + 2.152
     # handled specially
 }

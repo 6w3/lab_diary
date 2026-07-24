@@ -57,6 +57,8 @@
   "lab_ref": "Lab rozmezí",
   "app_tip_ref": "Orientační tip",
   "custom_marker": "Vlastní marker",
+  "source_label": "Popisek z reportu",
+  "bind_marker": "Biomarker",
   "trends_title": "Trendy",
   "select_marker": "Vyber marker",
   "account_title": "Účet",

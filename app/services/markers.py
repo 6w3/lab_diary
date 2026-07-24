@@ -306,9 +306,17 @@ def resolve_marker(
     markers: list[MarkerLike],
     *,
     code_hint: str | None = None,
+    user_aliases: dict[str, str] | None = None,
 ) -> MarkerLike | None:
-    """Prefer explicit catalog code from Smart AI, else fuzzy label match."""
+    """Prefer explicit catalog code, then user alias, else fuzzy label match."""
     by_code = {m.code: m for m in markers}
     if code_hint and code_hint in by_code:
         return by_code[code_hint]
+    if user_aliases and label:
+        from app.services.label_aliases import normalize_alias_label
+
+        norm = normalize_alias_label(label)
+        code = user_aliases.get(norm) if norm else None
+        if code and code in by_code:
+            return by_code[code]
     return match_marker(label, markers)

@@ -21,7 +21,8 @@
     <thead>
       <tr>
         <th></th>
-        <th>{{ t('marker') }}</th>
+        <th>{{ t('source_label') }}</th>
+        <th>{{ t('bind_marker') }}</th>
         <th>{{ t('value') }}</th>
         <th>{{ t('unit') }}</th>
         <th>{{ t('lab_ref') }}</th>
@@ -34,15 +35,24 @@
       {% for g in groups %}
         {% if multi_date or groups|length > 1 %}
         <tr class="date-group">
-          <td colspan="7"><strong>{{ t('drawn_at') }}: {{ g.date or '—' }}</strong></td>
+          <td colspan="8"><strong>{{ t('drawn_at') }}: {{ g.date or '—' }}</strong></td>
         </tr>
         {% endif %}
         {% for r in g.rows %}
         <tr>
           <td><input type="checkbox" name="selected" value="{{ ns.idx }}" checked></td>
           <td>
-            <input type="hidden" name="marker_code_{{ ns.idx }}" value="{{ r.marker_code }}">
-            <input type="text" name="label_{{ ns.idx }}" value="{{ r.label }}">
+            <input type="text" name="label_{{ ns.idx }}" value="{{ r.label }}" placeholder="{{ t('source_label') }}">
+          </td>
+          <td>
+            <select name="marker_code_{{ ns.idx }}">
+              <option value="">{{ t('custom_marker') }}</option>
+              {% for m in markers %}
+                <option value="{{ m.code }}" {% if m.code == r.marker_code %}selected{% endif %}>
+                  {{ m.name_cs if locale == 'cs' else m.name_en }} ({{ m.default_unit }})
+                </option>
+              {% endfor %}
+            </select>
           </td>
           <td><input type="number" step="any" name="value_{{ ns.idx }}" value="{{ r.value }}"></td>
           <td>
@@ -82,8 +92,15 @@
   <tr>
     <td><input type="checkbox" name="selected" value="__IDX__" checked></td>
     <td>
-      <input type="hidden" name="marker_code___IDX__" value="">
-      <input type="text" name="label___IDX__" value="">
+      <input type="text" name="label___IDX__" value="" placeholder="{{ t('source_label') }}">
+    </td>
+    <td>
+      <select name="marker_code___IDX__">
+        <option value="">{{ t('custom_marker') }}</option>
+        {% for m in markers %}
+          <option value="{{ m.code }}">{{ m.name_cs if locale == 'cs' else m.name_en }} ({{ m.default_unit }})</option>
+        {% endfor %}
+      </select>
     </td>
     <td><input type="number" step="any" name="value___IDX__" value=""></td>
     <td>

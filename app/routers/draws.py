@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
+from app.services.label_aliases import load_user_aliases
 from app.services.markers import resolve_marker
 from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
@@ -245,6 +246,7 @@ async def upload_files(
     settings = get_settings()
     catalog = db.query(Marker).all()
     marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
+    user_aliases = load_user_aliases(db, user.id)
     last_att_id = None
 
     def _proposal_dt(p: dict) -> datetime | None:
@@ -281,8 +283,14 @@ async def upload_files(
             att.ocr_status = "done"
             for p in proposals:
                 code_hint = (p.get("marker_code") or "").strip() or None
-                matched = resolve_marker(p.get("label") or "", catalog, code_hint=code_hint)
-                label = matched.name_cs if matched else p.get("label")
+                source_label = (p.get("label") or "").strip()
+                matched = resolve_marker(
+                    source_label,
+                    catalog,
+                    code_hint=code_hint,
+                    user_aliases=user_aliases,
+                )
+                label = source_label or (matched.name_cs if matched else None)
                 unit = normalize_unit(p.get("unit") or "")
                 if matched and not unit:
                     unit = matched.default_unit
@@ -354,6 +362,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             }
         )
     multi_date = len(unique_drawn_dates(proposals)) > 1
+    catalog = db.query(Marker).order_by(Marker.name_cs).all()
     return templates.TemplateResponse(
         request,
         "draws/ocr_review.html",
@@ -366,6 +375,7 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             multi_date=multi_date,
             detected_dates=unique_drawn_dates(proposals),
             unit_choices=UNIT_CHOICES,
+            markers=catalog,
             default_date=draw.drawn_at.strftime("%Y-%m-%d") if draw.drawn_at else "",
         ),
     )
@@ -431,7 +441,13 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
         lab_low = float(low) if low not in (None, "") else None
         lab_high = float(high) if high not in (None, "") else None
         notes = (form.get(f"notes_{idx}") or "").strip() or None
-        code_hint = (form.get(f"marker_code_{idx}") or "").strip() or None
+        code_raw = form.get(f"marker_code_{idx}")
+        if code_raw is None:
+            code_hint = None
+            allow_fuzzy = True
+        else:
+            code_hint = (code_raw or "").strip() or None
+            allow_fuzzy = bool(code_hint)
         date_raw = (form.get(f"date_{idx}") or "").strip()
         proposed = None
         if date_raw:
@@ -448,6 +464,7 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
             lab_high=lab_high,
             catalog=catalog,
             code_hint=code_hint,
+            allow_fuzzy=allow_fuzzy,
         )
         target = _resolve_target_draw(db, user, draw, proposed)
 

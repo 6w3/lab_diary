@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
 from app.models import Attachment, BloodDraw, ImportJob, Marker, ResultValue
+from app.services.label_aliases import load_user_aliases
 from app.services.markers import resolve_marker
 from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
@@ -32,12 +33,24 @@ def _proposal_dt(raw: str | None) -> str:
     return d.isoformat() if d else ""
 
 
-def _enrich_proposals(proposals: list[dict], catalog: list[Marker]) -> list[dict]:
+def _enrich_proposals(
+    proposals: list[dict],
+    catalog: list[Marker],
+    *,
+    user_aliases: dict[str, str] | None = None,
+) -> list[dict]:
     out: list[dict] = []
     for p in proposals:
         code = (p.get("marker_code") or "").strip() or None
-        matched = resolve_marker(p.get("label") or "", catalog, code_hint=code)
-        label = matched.name_cs if matched else (p.get("label") or "")
+        source_label = (p.get("label") or "").strip()
+        matched = resolve_marker(
+            source_label,
+            catalog,
+            code_hint=code,
+            user_aliases=user_aliases,
+        )
+        # Keep OCR/source label editable; catalog binding is via marker_code select
+        label = source_label or (matched.name_cs if matched else "")
         unit = normalize_unit(p.get("unit") or "")
         if matched and not unit:
             unit = matched.default_unit
@@ -148,6 +161,7 @@ async def import_upload(
 
     catalog = db.query(Marker).all()
     marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
+    user_aliases = load_user_aliases(db, user.id)
 
     try:
         if mode == "smart":
@@ -161,7 +175,7 @@ async def import_upload(
             proposals,
             key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
         )
-        enriched = _enrich_proposals(proposals, catalog)
+        enriched = _enrich_proposals(proposals, catalog, user_aliases=user_aliases)
         detected_dates = unique_drawn_dates(enriched)
         detected_lab = ((_meta or {}).get("lab_name") or "").strip()
         default_lab = (lab_name or "").strip() or detected_lab or "Laboratoř"
@@ -219,6 +233,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         by_date.setdefault(d, []).append(p)
     for d in sorted(by_date.keys(), key=lambda x: x or "9999"):
         groups.append({"date": d, "rows": by_date[d]})
+    catalog = db.query(Marker).order_by(Marker.name_cs).all()
     return templates.TemplateResponse(
         request,
         "import/review.html",
@@ -230,6 +245,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             groups=groups,
             lab_name=payload.get("lab_name") or "Laboratoř",
             unit_choices=UNIT_CHOICES,
+            markers=catalog,
             detected_dates=detected_dates,
             multi_date=multi_date,
         ),
@@ -269,7 +285,14 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
         lab_high = float(high_raw) if high_raw not in (None, "") else None
         notes = (form.get(f"notes_{idx}") or "").strip() or None
         date_raw = (form.get(f"date_{idx}") or "").strip()
-        code_hint = (form.get(f"marker_code_{idx}") or "").strip() or None
+        # Empty select = force custom; missing field falls back to fuzzy
+        code_raw = form.get(f"marker_code_{idx}")
+        if code_raw is None:
+            code_hint = None
+            allow_fuzzy = True
+        else:
+            code_hint = (code_raw or "").strip() or None
+            allow_fuzzy = bool(code_hint)
 
         drawn_at = datetime.combine(date.today(), datetime.min.time())
         if date_raw:
@@ -287,6 +310,7 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             lab_high=lab_high,
             catalog=catalog,
             code_hint=code_hint,
+            allow_fuzzy=allow_fuzzy,
         )
 
         draw = _find_or_create_draw(db, user.id, drawn_at, lab_name, workplace)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.models import CustomMarker, Marker
+from app.services.label_aliases import learn_label_alias, load_user_aliases
 from app.services.markers import resolve_marker
 from app.services.ocr_parse import normalize_unit
 from app.services.units import to_canonical
@@ -19,9 +20,21 @@ def bind_marker_and_units(
     lab_high: float | None,
     catalog: list[Marker],
     code_hint: str | None = None,
+    allow_fuzzy: bool = True,
+    learn_alias: bool = True,
 ) -> tuple[str | None, int | None, str | None, float, str, float | None, float | None]:
-    """Return marker_code, custom_id, label, value, unit, lab_low, lab_high."""
-    matched = resolve_marker(label or "", catalog, code_hint=code_hint)
+    """Return marker_code, custom_id, label, value, unit, lab_low, lab_high.
+
+    When allow_fuzzy is False and code_hint is empty, force custom marker
+    (user explicitly chose \"custom\" in the review select).
+    """
+    aliases = load_user_aliases(db, user_id)
+    if code_hint:
+        matched = resolve_marker(label or "", catalog, code_hint=code_hint, user_aliases=aliases)
+    elif allow_fuzzy:
+        matched = resolve_marker(label or "", catalog, code_hint=None, user_aliases=aliases)
+    else:
+        matched = None
 
     unit_n = normalize_unit(unit or "")
     if matched:
@@ -40,6 +53,8 @@ def bind_marker_and_units(
                 high_out = hv
         if not nu:
             nu = matched.default_unit
+        if learn_alias and label:
+            learn_label_alias(db, user_id, label, matched.code, catalog)
         return matched.code, None, matched.name_cs, nv, nu, low_out, high_out
 
     custom_id = None

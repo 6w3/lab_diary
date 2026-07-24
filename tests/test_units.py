@@ -24,3 +24,24 @@ def test_hba1c_ifcc_to_ngsp():
     v, ok = convert_value(42.0, "mmol/mol", "%", marker_code="hba1c")
     assert ok
     assert abs(v - (0.09148 * 42 + 2.152)) < 1e-3
+
+
+def test_iron_ug_dl_to_umol():
+    v, unit, ok = to_canonical(100.0, "ug/dl", "iron", "umol/l")
+    assert ok
+    assert unit == "umol/l"
+    assert abs(v - 100.0 / 5.586) < 1e-3
+
+
+def test_uric_acid_mg_dl_to_umol():
+    v, unit, ok = to_canonical(5.0, "mg/dl", "uric_acid", "umol/l")
+    assert ok
+    assert unit == "umol/l"
+    assert abs(v - 5.0 * 59.48) < 1e-3
+
+
+def test_calcium_mg_dl_to_mmol():
+    v, unit, ok = to_canonical(10.0, "mg/dl", "calcium", "mmol/l")
+    assert ok
+    assert unit == "mmol/l"
+    assert abs(v - 10.0 / 4.008) < 1e-3

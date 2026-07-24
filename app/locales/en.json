@@ -57,6 +57,8 @@
   "lab_ref": "Lab range",
   "app_tip_ref": "App tip range",
   "custom_marker": "Custom marker",
+  "source_label": "Report label",
+  "bind_marker": "Biomarker",
   "trends_title": "Trends",
   "select_marker": "Select marker",
   "account_title": "Account",

@@ -29,6 +29,7 @@ class User(Base):
     oauth_accounts: Mapped[list["OAuthAccount"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     blood_draws: Mapped[list["BloodDraw"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     custom_markers: Mapped[list["CustomMarker"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    label_aliases: Mapped[list["LabelAlias"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     email_tokens: Mapped[list["EmailToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     import_jobs: Mapped[list["ImportJob"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
@@ -159,6 +160,22 @@ class CustomMarker(Base):
 
     user: Mapped[User] = relationship(back_populates="custom_markers")
     results: Mapped[list["ResultValue"]] = relationship(back_populates="custom_marker")
+
+
+class LabelAlias(Base):
+    """User-learned OCR/custom label → catalog marker mapping."""
+
+    __tablename__ = "label_aliases"
+    __table_args__ = (UniqueConstraint("user_id", "label_norm", name="uq_label_alias_user_norm"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    label_raw: Mapped[str] = mapped_column(String(255))
+    label_norm: Mapped[str] = mapped_column(String(255))
+    marker_code: Mapped[str] = mapped_column(ForeignKey("markers.code", ondelete="CASCADE"))
+
+    user: Mapped[User] = relationship(back_populates="label_aliases")
+    marker: Mapped["Marker"] = relationship()
 
 
 class ResultValue(Base):
