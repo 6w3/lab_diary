@@ -170,10 +170,12 @@ MARKER_ALIASES: dict[str, str] = {
     "mg": "magnesium",
     "hořčík": "magnesium",
     "horcik": "magnesium",
-    "p": "phosphorus",
     "fosfor": "phosphorus",
     "fosfáty": "phosphorus",
     "phosphate": "phosphorus",
+    "s_p": "phosphorus",
+    "s p": "phosphorus",
+    # NOTE: do not alias bare "p" — matches PSA/P1NP/PTH noise
     "kreatinin": "creatinine",
     "crea": "creatinine",
     "kyselina mocova": "uric_acid",

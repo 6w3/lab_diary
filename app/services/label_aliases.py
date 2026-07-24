@@ -61,6 +61,16 @@ def learn_label_alias(db, user_id: int, label: str, marker_code: str, catalog: l
         .filter(LabelAlias.user_id == user_id, LabelAlias.label_norm == norm)
         .first()
     )
+    # Same confirm batch may learn the same norm twice before flush
+    if existing is None:
+        for obj in db.new:
+            if (
+                isinstance(obj, LabelAlias)
+                and obj.user_id == user_id
+                and obj.label_norm == norm
+            ):
+                existing = obj
+                break
     if existing:
         existing.marker_code = marker_code
         existing.label_raw = raw
