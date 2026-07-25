@@ -6,7 +6,7 @@ import json
 from datetime import date, datetime
 from types import SimpleNamespace
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -144,7 +144,63 @@ def import_form(request: Request, locale: LocaleDep, user: UserDep):
     )
 
 
-def _progress_file_entry(att: Attachment, atts: list[Attachment], total: int) -> dict:
+def _markers_by_attachment(proposals: list[dict]) -> dict[int, list]:
+    out: dict[int, list] = {}
+    for p in proposals:
+        raw_aid = p.get("attachment_id")
+        if raw_aid is None or raw_aid == "":
+            continue
+        try:
+            aid = int(raw_aid)
+        except (TypeError, ValueError):
+            continue
+        out.setdefault(aid, []).append(
+            SimpleNamespace(
+                label=(p.get("label") or "").strip() or "—",
+                value=p.get("value"),
+                unit=(p.get("unit") or "").strip(),
+                drawn_on=(p.get("proposed_drawn_on") or "").strip(),
+            )
+        )
+    return out
+
+
+def _file_verify_cards(job: ImportJob, db, *, locale: str) -> tuple[list, str]:
+    """Per-file cards for step-1 verify UI. Returns (cards, files_sig for poll reload)."""
+    from app.i18n import t as i18n_t
+
+    atts = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .order_by(Attachment.id)
+        .all()
+    )
+    proposals, _payload = prepare_review_proposals(db, job, job_payload(job))
+    by_att = _markers_by_attachment(proposals)
+    status_labels = {
+        "done": i18n_t(locale, "import_att_status_done"),
+        "failed": i18n_t(locale, "import_att_status_failed"),
+        "pending": i18n_t(locale, "import_att_status_pending"),
+        "processing": i18n_t(locale, "import_att_status_processing"),
+    }
+    cards = []
+    sig_parts = []
+    for i, a in enumerate(atts):
+        markers = by_att.get(a.id, [])
+        cards.append(
+            SimpleNamespace(
+                id=a.id,
+                display_name=attachment_display_name(a, index=i + 1, total=len(atts)),
+                status=a.ocr_status,
+                status_label=status_labels.get(a.ocr_status, a.ocr_status),
+                markers=markers,
+                can_act=a.ocr_status in {"done", "failed"},
+                preview_ready=a.ocr_status in {"done", "failed", "processing"},
+            )
+        )
+        sig_parts.append(f"{a.id}:{a.ocr_status}:{len(markers)}")
+    return cards, "|".join(sig_parts)
+
     pos = next((i + 1 for i, x in enumerate(atts) if x.id == att.id), None)
     return {
         "attachment_id": att.id,
@@ -218,7 +274,7 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         file_errors = []
 
     if job.status == "review":
-        message = i18n_t(locale, "import_progress_done")
+        message = i18n_t(locale, "import_files_step_ready")
     elif job.status == "failed":
         message = i18n_t(locale, "import_progress_failed")
     elif failed_atts and unfinished:
@@ -266,9 +322,17 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         error = None
 
     proposal_count = len(payload.get("proposals") or [])
-    # Mid-flight review: confirm already-extracted rows while other files still run.
+    # Mid-flight: continue to draws when any proposals ready; stay on files when batch done.
     review_ready = proposal_count > 0 and job.status in {"processing", "review"}
+    if job.status == "review":
+        review_ready = True
     review_url = f"/import/{job.id}/review" if review_ready else None
+
+    # Signature so files page can reload when a file finishes / markers change.
+    files_sig = "|".join(
+        f"{a.id}:{a.ocr_status}"
+        for a in atts
+    )
 
     return {
         "status": job.status,
@@ -289,6 +353,7 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         "file_running": file_running,
         "file_queued": file_queued,
         "file_errors": file_errors,
+        "files_sig": files_sig,
         "server_queue": True,
     }
 
@@ -383,22 +448,19 @@ def import_progress(
     locale: LocaleDep,
     user: UserDep,
     job_id: int,
-    tab: str = Query(""),
 ):
+    """Step 1: verify per-file OCR (preview, biomarkers RO, re-extract / delete)."""
     job = db.get(ImportJob, job_id)
     if not job or job.user_id != user.id:
+        return redirect("/draws")
+    if job.status == "confirmed":
+        return redirect("/draws")
+    if job.status not in {"processing", "failed", "review"}:
         return redirect("/import")
-    review_tab = (tab or "").strip().lower()
-    if review_tab not in {"results", "files"}:
-        review_tab = ""
-    review_qs = f"?tab={review_tab}" if review_tab else ""
-    if job.status == "review":
-        return redirect(f"/import/{job.id}/review{review_qs}")
-    if job.status not in {"processing", "failed"}:
-        return redirect("/import")
-    # Ensure worker is awake if user reopened progress page
-    kick_import_worker()
-    review_url = f"/import/{job.id}/review{review_qs}"
+    if job.status == "processing":
+        kick_import_worker()
+    progress = _progress_dict(job, db, locale=locale)
+    file_cards, files_sig = _file_verify_cards(job, db, locale=locale)
     return templates.TemplateResponse(
         request,
         "import/progress.html",
@@ -406,8 +468,11 @@ def import_progress(
             request,
             locale,
             job=job,
-            progress=_progress_dict(job, db, locale=locale),
-            review_url=review_url,
+            progress=progress,
+            file_cards=file_cards,
+            files_sig=files_sig,
+            review_url=progress.get("review_url") or f"/import/{job.id}/review",
+            smart_available=smart_enabled(),
         ),
     )
 
@@ -513,14 +578,11 @@ def import_review(
     locale: LocaleDep,
     user: UserDep,
     job_id: int,
-    tab: str = Query("results"),
 ):
+    """Step 2: merge proposals into draws and edit/confirm values."""
     job = db.get(ImportJob, job_id)
     if not job or job.user_id != user.id or job.status not in {"review", "processing"}:
         return redirect("/draws")
-    view_tab = (tab or "results").strip().lower()
-    if view_tab not in {"results", "files"}:
-        view_tab = "results"
     raw_payload = job_payload(job)
     if job.status == "processing" and not (raw_payload.get("proposals") or []):
         return redirect(f"/import/{job.id}/progress")
@@ -602,42 +664,6 @@ def import_review(
     groups = _build_groups(db, user.id, proposals, lab_name)
     catalog = db.query(Marker).order_by(Marker.name_cs).all()
     still_running = job.status == "processing" and job_has_active_attachments(db, job.id)
-    status_labels = {
-        "done": t(locale, "import_att_status_done"),
-        "failed": t(locale, "import_att_status_failed"),
-        "pending": t(locale, "import_att_status_pending"),
-        "processing": t(locale, "import_att_status_processing"),
-    }
-    markers_by_att: dict[int, list] = {}
-    for p in proposals:
-        raw_aid = p.get("attachment_id")
-        if raw_aid is None or raw_aid == "":
-            continue
-        try:
-            aid = int(raw_aid)
-        except (TypeError, ValueError):
-            continue
-        markers_by_att.setdefault(aid, []).append(
-            SimpleNamespace(
-                label=(p.get("label") or "").strip() or "—",
-                value=p.get("value"),
-                unit=(p.get("unit") or "").strip(),
-                drawn_on=(p.get("proposed_drawn_on") or "").strip(),
-            )
-        )
-    reextract_atts = []
-    for i, a in enumerate(job_atts):
-        if a.ocr_status not in {"done", "failed"}:
-            continue
-        reextract_atts.append(
-            SimpleNamespace(
-                id=a.id,
-                display_name=attachment_display_name(a, index=i + 1, total=len(job_atts)),
-                status=a.ocr_status,
-                status_label=status_labels.get(a.ocr_status, a.ocr_status),
-                markers=markers_by_att.get(a.id, []),
-            )
-        )
     return templates.TemplateResponse(
         request,
         "import/review.html",
@@ -656,10 +682,7 @@ def import_review(
             detected_dates=detected_dates,
             multi_date=multi_date,
             still_running=still_running,
-            progress_url=f"/import/{job.id}/progress",
-            reextract_atts=reextract_atts,
-            smart_available=smart_enabled(),
-            review_tab=view_tab,
+            files_url=f"/import/{job.id}/progress",
         ),
     )
 
@@ -771,12 +794,11 @@ async def import_reextract(request: Request, db: DbDep, user: UserDep, job_id: i
         att_id = 0
     hint = (form.get("user_hint") or "").strip()
     if not att_id:
-        return redirect(f"/import/{job.id}/review?tab=files")
+        return redirect(f"/import/{job.id}/progress")
     ok = queue_attachment_reextract(db, job, attachment_id=att_id, user_hint=hint)
     if ok:
         kick_import_worker()
-        return redirect(f"/import/{job.id}/progress?tab=files")
-    return redirect(f"/import/{job.id}/review?tab=files")
+    return redirect(f"/import/{job.id}/progress")
 
 
 @router.post("/{job_id}/remove-file")
@@ -792,7 +814,7 @@ async def import_remove_file(request: Request, db: DbDep, locale: LocaleDep, use
     except (TypeError, ValueError):
         att_id = 0
     if not att_id:
-        return redirect(f"/import/{job.id}/review?tab=files")
+        return redirect(f"/import/{job.id}/progress")
 
     result = remove_import_attachment(db, job, attachment_id=att_id)
     if result == "job_deleted":
@@ -800,7 +822,7 @@ async def import_remove_file(request: Request, db: DbDep, locale: LocaleDep, use
         return redirect("/draws")
     if result == "removed":
         request.session["flash"] = t(locale, "import_file_removed")
-    return redirect(f"/import/{job_id}/review?tab=files")
+    return redirect(f"/import/{job_id}/progress")
 
 
 @router.post("/{job_id}/discard")

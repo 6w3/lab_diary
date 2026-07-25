@@ -1,13 +1,21 @@
 {% extends "base.html" %}
-{% block title %}{{ t('ocr_review') }}{% endblock %}
+{% block title %}{{ t('import_draws_step_title') }}{% endblock %}
 {% block content %}
-<h1>{{ t('ocr_review') }}</h1>
+<p class="import-steps muted">
+  <a href="{{ files_url }}">{{ t('import_step_files') }}</a>
+  <span aria-hidden="true">→</span>
+  <strong>{{ t('import_step_draws') }}</strong>
+</p>
+<h1>{{ t('import_draws_step_title') }}</h1>
+<p class="muted">{{ t('import_draws_step_hint') }}</p>
 {% if still_running %}
   <div class="card review-running-banner">
     <p><strong>{{ t('import_review_partial_title') }}</strong></p>
     <p class="muted">{{ t('import_review_partial_hint') }}</p>
-    <p><a class="btn secondary" href="{{ progress_url }}">{{ t('import_back_to_progress') }}</a></p>
+    <p><a class="btn secondary" href="{{ files_url }}">{{ t('import_back_to_files') }}</a></p>
   </div>
+{% else %}
+  <p><a class="btn secondary" href="{{ files_url }}">{{ t('import_back_to_files') }}</a></p>
 {% endif %}
 {% if file_errors and file_errors|length > 0 %}
   <div class="card error-box">
@@ -36,68 +44,6 @@
   </div>
 {% endif %}
 
-<nav class="review-tabs" aria-label="{{ t('ocr_review') }}">
-  <a href="/import/{{ job.id }}/review?tab=results"
-     {% if review_tab != 'files' %}aria-current="page"{% endif %}>{{ t('review_tab_results') }}</a>
-  {% if smart_available and reextract_atts %}
-  <a href="/import/{{ job.id }}/review?tab=files"
-     {% if review_tab == 'files' %}aria-current="page"{% endif %}>{{ t('review_tab_files') }}</a>
-  {% endif %}
-</nav>
-
-{% if review_tab == 'files' and smart_available and reextract_atts %}
-<section class="card reextract-box">
-  <h2>{{ t('import_reextract_title') }}</h2>
-  <p class="muted">{{ t('import_reextract_hint') }}</p>
-  {% for a in reextract_atts %}
-  <div class="reextract-row">
-    <a class="att-preview-link" href="/import/{{ job.id }}/attachment/{{ a.id }}/preview" target="_blank" rel="noopener">
-      <img class="att-preview" src="/import/{{ job.id }}/attachment/{{ a.id }}/preview"
-           alt="{{ a.display_name }}" loading="lazy" width="360" height="240">
-    </a>
-    <form method="post" action="/import/{{ job.id }}/reextract" class="reextract-form">
-      <input type="hidden" name="attachment_id" value="{{ a.id }}">
-      <div class="reextract-head">
-        <strong>{{ a.display_name }}</strong>
-        <span class="muted">{{ a.status_label }}</span>
-      </div>
-      <label>{{ t('import_reextract_prompt') }}
-        <textarea name="user_hint" rows="3" maxlength="1500"
-                  placeholder="{{ t('import_reextract_placeholder') }}"></textarea>
-      </label>
-      <div class="reextract-actions">
-        <button type="submit" class="secondary">{{ t('import_reextract_submit') }}</button>
-      </div>
-    </form>
-    <div class="reextract-side">
-      <form method="post" action="/import/{{ job.id }}/remove-file" class="reextract-delete"
-            data-confirm="{{ t('import_remove_file_confirm') }}"
-            onsubmit="return confirm(this.getAttribute('data-confirm'))">
-        <input type="hidden" name="attachment_id" value="{{ a.id }}">
-        <button type="submit" class="danger">{{ t('import_remove_file') }}</button>
-      </form>
-      <details class="att-markers">
-        <summary>{{ t('import_file_markers', count=a.markers|length) }}</summary>
-        {% if a.markers %}
-        <ul>
-          {% for m in a.markers %}
-          <li>
-            <strong>{{ m.label }}</strong>
-            {% if m.value is not none %}{{ m.value }}{% endif %}
-            {% if m.unit %}{{ m.unit }}{% endif %}
-            {% if m.drawn_on %}<span class="muted">{{ m.drawn_on }}</span>{% endif %}
-          </li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p class="muted">{{ t('import_file_markers_empty') }}</p>
-        {% endif %}
-      </details>
-    </div>
-  </div>
-  {% endfor %}
-</section>
-{% else %}
 {% if multi_date %}
   <p class="muted">{{ t('multi_date_hint') }}</p>
   <p><strong>{{ t('detected_dates') }}:</strong> {{ detected_dates | join(', ') }}</p>
@@ -315,5 +261,4 @@
   });
 })();
 </script>
-{% endif %}
 {% endblock %}

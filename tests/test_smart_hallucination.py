@@ -92,6 +92,61 @@ def test_real_single_draw_not_hallucination():
     assert not looks_like_hallucinated_extract(props)
 
 
+def test_order_form_payload_cleared():
+    from app.services.smart_extract import _validate_smart_payload
+
+    out = _validate_smart_payload(
+        {
+            "doc_kind": "order_form",
+            "draws": [
+                {
+                    "drawn_on": "2020-02-01",
+                    "results": [
+                        {"label": "Hemoglobin", "marker_code": "hgb", "value": 8.0, "unit": "g/dl"},
+                    ],
+                }
+            ],
+        }
+    )
+    assert out["draws"] == []
+    assert "order_form_no_results" in out["warnings"]
+
+
+def test_order_form_hallucination_cbc_without_refs():
+    from app.services.smart_extract import looks_like_order_form_hallucination
+
+    props = [
+        {"marker_code": "wbc", "label": "Leukocyty", "value": 11.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "rbc", "label": "Erytrocyty", "value": 3.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "hgb", "label": "Hemoglobin", "value": 8.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "hct", "label": "Hematokrit", "value": 26.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "plt", "label": "Trombocyty", "value": 200.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "mcv", "label": "MCV", "value": 88.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "mch", "label": "MCH", "value": 28.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "mchc", "label": "MCHC", "value": 32.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "neutrophils", "label": "Neutrofily", "value": 7.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "lymphocytes", "label": "Lymfocyty", "value": 2.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "monocytes", "label": "Monocyty", "value": 0.5, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "eosinophils", "label": "Eozinofily", "value": 0.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "basophils", "label": "Bazofily", "value": 0.0, "proposed_drawn_on": "2020-02-01"},
+        {"marker_code": "rdw", "label": "RDW", "value": 13.0, "proposed_drawn_on": "2020-02-01"},
+    ]
+    assert looks_like_order_form_hallucination(props)
+
+    # Real KO with refs must pass
+    with_refs = [{**p, "lab_ref_low": 1.0, "lab_ref_high": 2.0} for p in props]
+    assert not looks_like_order_form_hallucination(with_refs)
+
+
+def test_normalize_doc_kind():
+    from app.services.smart_extract import _normalize_doc_kind
+
+    assert _normalize_doc_kind("order_form") == "order_form"
+    assert _normalize_doc_kind("žádanka") == "order_form"
+    assert _normalize_doc_kind("lab_results") == "lab_results"
+    assert _normalize_doc_kind("nope") == "unknown"
+
+
 def test_message_text_prefers_content():
     assert _message_text({"content": '{"a":1}', "reasoning_content": "noise {\"a\":2}"}) == '{"a":1}'
 

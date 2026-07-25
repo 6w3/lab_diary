@@ -1,57 +1,44 @@
 {% extends "base.html" %}
-{% block title %}{{ t('import_progress_title') }} — {{ t('app_name') }}{% endblock %}
+{% block title %}{{ t('import_files_step_title') }} — {{ t('app_name') }}{% endblock %}
 {% block content %}
-<section class="import-progress card" id="import-progress"
+<section class="import-files-step" id="import-progress"
          data-job-id="{{ job.id }}"
          data-status="{{ progress.status }}"
+         data-files-sig="{{ files_sig }}"
          data-review-url="{{ review_url }}"
-         data-retry-label="{{ t('import_retry_file') }}"
-         data-retry-all-label="{{ t('import_retry_all_failed') }}"
-         data-review-ready-label="{{ t('import_review_ready') }}">
-  <h1>{{ t('import_progress_title') }}</h1>
-  <div class="spinner" aria-hidden="true"></div>
-  <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
-  <p class="muted">{{ t('import_progress_server_hint') }}</p>
-  <div class="progress-bar" role="progressbar"
-       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}">
-    <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
+         data-continue-label="{{ t('import_continue_to_draws') }}"
+         data-continue-count-label="{{ t('import_review_ready') }}">
+  <p class="import-steps muted">
+    <strong>{{ t('import_step_files') }}</strong>
+    <span aria-hidden="true">→</span>
+    <span>{{ t('import_step_draws') }}</span>
+  </p>
+  <h1>{{ t('import_files_step_title') }}</h1>
+  <p class="muted">{{ t('import_files_step_hint') }}</p>
+
+  <div class="import-progress-head card" {% if progress.status == 'review' and not progress.running and not progress.queued %}hidden{% endif %}>
+    <div class="spinner" aria-hidden="true" id="progress-spinner"
+         {% if progress.status in ['review', 'failed'] and not progress.running %}hidden{% endif %}></div>
+    <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
+    <p class="muted">{{ t('import_progress_server_hint') }}</p>
+    <div class="progress-bar" role="progressbar"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}">
+      <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
+    </div>
+    <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
   </div>
-  <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
 
   <p id="progress-review-cta" class="progress-review-cta"
-     {% if not progress.review_ready or progress.status == 'review' %}hidden{% endif %}>
+     {% if not progress.review_ready %}hidden{% endif %}>
     <a class="btn" id="progress-review-link" href="{{ review_url }}">
-      {{ t('import_review_ready', count=progress.proposal_count or 0) }}
+      {% if progress.proposal_count %}
+        {{ t('import_review_ready', count=progress.proposal_count) }}
+      {% else %}
+        {{ t('import_continue_to_draws') }}
+      {% endif %}
     </a>
-    <span class="muted">{{ t('import_review_while_running_hint') }}</span>
+    <span class="muted">{{ t('import_continue_while_running_hint') }}</span>
   </p>
-
-  <div class="file-status-grid" id="progress-file-status">
-    <div class="file-status-block" id="progress-done-box" {% if not progress.file_done %}hidden{% endif %}>
-      <p><strong>{{ t('import_files_done_title') }}</strong></p>
-      <ul class="file-status-list" id="progress-done-list">
-        {% for e in progress.file_done or [] %}
-          <li>{{ e.filename }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div class="file-status-block" id="progress-running-box" {% if not progress.file_running %}hidden{% endif %}>
-      <p><strong>{{ t('import_files_running_title') }}</strong></p>
-      <ul class="file-status-list" id="progress-running-list">
-        {% for e in progress.file_running or [] %}
-          <li>{{ e.filename }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    <div class="file-status-block" id="progress-queued-box" {% if not progress.file_queued %}hidden{% endif %}>
-      <p><strong>{{ t('import_files_queued_title') }}</strong></p>
-      <ul class="file-status-list" id="progress-queued-list">
-        {% for e in progress.file_queued or [] %}
-          <li>{{ e.filename }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-  </div>
 
   <div class="card error-box" id="progress-file-errors"
        {% if not progress.file_errors or (progress.file_errors|length) == 0 %}hidden{% endif %}>
@@ -81,14 +68,82 @@
   <p id="progress-actions" {% if progress.status != 'failed' %}hidden{% endif %}>
     <a class="btn" href="/import">{{ t('upload_report') }}</a>
   </p>
+
+  <section class="file-verify-list" aria-label="{{ t('import_files_step_title') }}">
+    {% for a in file_cards %}
+    <article class="card reextract-row file-verify-card" data-att-id="{{ a.id }}" data-status="{{ a.status }}">
+      {% if a.preview_ready %}
+      <a class="att-preview-link" href="/import/{{ job.id }}/attachment/{{ a.id }}/preview" target="_blank" rel="noopener">
+        <img class="att-preview" src="/import/{{ job.id }}/attachment/{{ a.id }}/preview"
+             alt="{{ a.display_name }}" loading="lazy" width="360" height="240">
+      </a>
+      {% else %}
+      <div class="att-preview-placeholder muted">{{ a.status_label }}…</div>
+      {% endif %}
+
+      <div class="reextract-form">
+        <div class="reextract-head">
+          <strong>{{ a.display_name }}</strong>
+          <span class="muted">{{ a.status_label }}</span>
+        </div>
+        {% if a.can_act and smart_available %}
+        <form method="post" action="/import/{{ job.id }}/reextract">
+          <input type="hidden" name="attachment_id" value="{{ a.id }}">
+          <label>{{ t('import_reextract_prompt') }}
+            <textarea name="user_hint" rows="3" maxlength="1500"
+                      placeholder="{{ t('import_reextract_placeholder') }}"></textarea>
+          </label>
+          <div class="reextract-actions">
+            <button type="submit" class="secondary">{{ t('import_reextract_submit') }}</button>
+          </div>
+        </form>
+        {% elif a.status in ['pending', 'processing'] %}
+        <p class="muted">{{ t('import_file_waiting') }}</p>
+        {% endif %}
+      </div>
+
+      <div class="reextract-side">
+        {% if a.can_act %}
+        <form method="post" action="/import/{{ job.id }}/remove-file" class="reextract-delete"
+              data-confirm="{{ t('import_remove_file_confirm') }}"
+              onsubmit="return confirm(this.getAttribute('data-confirm'))">
+          <input type="hidden" name="attachment_id" value="{{ a.id }}">
+          <button type="submit" class="danger">{{ t('import_remove_file') }}</button>
+        </form>
+        {% endif %}
+        {% if a.status == 'done' or a.markers %}
+        <details class="att-markers" {% if a.markers %}open{% endif %}>
+          <summary>{{ t('import_file_markers', count=a.markers|length) }}</summary>
+          {% if a.markers %}
+          <ul>
+            {% for m in a.markers %}
+            <li>
+              <strong>{{ m.label }}</strong>
+              {% if m.value is not none %}{{ m.value }}{% endif %}
+              {% if m.unit %}{{ m.unit }}{% endif %}
+              {% if m.drawn_on %}<span class="muted">{{ m.drawn_on }}</span>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="muted">{{ t('import_file_markers_empty') }}</p>
+          {% endif %}
+        </details>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <p class="muted">{{ t('import_no_files_yet') }}</p>
+    {% endfor %}
+  </section>
 </section>
 <script>
 (function () {
   const root = document.getElementById("import-progress");
   if (!root) return;
   const jobId = root.dataset.jobId;
-  const retryLabel = root.dataset.retryLabel || "Retry";
-  const reviewReadyTpl = root.dataset.reviewReadyLabel || "Review ready ({count})";
+  const continueLabel = root.dataset.continueLabel || "Continue";
+  const continueCountTpl = root.dataset.continueCountLabel || "Review ready ({count})";
   const statusEl = document.getElementById("progress-status");
   const fillEl = document.getElementById("progress-fill");
   const countEl = document.getElementById("progress-count");
@@ -101,33 +156,16 @@
   const reviewCta = document.getElementById("progress-review-cta");
   const reviewLink = document.getElementById("progress-review-link");
   const bar = root.querySelector(".progress-bar");
-  const doneBox = document.getElementById("progress-done-box");
-  const doneList = document.getElementById("progress-done-list");
-  const runningBox = document.getElementById("progress-running-box");
-  const runningList = document.getElementById("progress-running-list");
-  const queuedBox = document.getElementById("progress-queued-box");
-  const queuedList = document.getElementById("progress-queued-list");
+  const spinner = document.getElementById("progress-spinner");
+  const head = root.querySelector(".import-progress-head");
   let stopped = false;
   let timer = null;
+  let filesSig = root.dataset.filesSig || "";
 
   function esc(s) {
     return String(s || "").replace(/[<>&]/g, function (c) {
       return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
     });
-  }
-
-  function renderNameList(box, listEl, items) {
-    if (!box || !listEl) return;
-    const list = Array.isArray(items) ? items : [];
-    if (!list.length) {
-      box.hidden = true;
-      listEl.innerHTML = "";
-      return;
-    }
-    box.hidden = false;
-    listEl.innerHTML = list.map(function (e) {
-      return "<li>" + esc(e.filename || "file") + "</li>";
-    }).join("");
   }
 
   function renderFileErrors(errors) {
@@ -150,8 +188,7 @@
         btn =
           '<form method="post" action="/import/' + jobId + '/retry-files" class="inline-form">' +
           '<input type="hidden" name="attachment_id" value="' + esc(id) + '">' +
-          '<button type="submit" class="secondary">' + esc(retryLabel) + "</button>" +
-          "</form>";
+          '<button type="submit" class="secondary">Retry</button></form>';
       }
       return "<li><span><strong>" + name + "</strong>: " + err + "</span>" + btn + "</li>";
     }).join("");
@@ -166,15 +203,14 @@
 
   function renderReviewCta(data) {
     if (!reviewCta || !reviewLink) return;
-    // Full batch done → auto-redirect; mid-flight → show CTA.
-    if (data.status === "review") {
-      reviewCta.hidden = true;
-      return;
-    }
     if (data.review_ready) {
       reviewCta.hidden = false;
       reviewLink.href = preferredReviewUrl(data);
-      reviewLink.textContent = reviewReadyTpl.replace("{count}", String(data.proposal_count || 0));
+      if (data.proposal_count) {
+        reviewLink.textContent = continueCountTpl.replace("{count}", String(data.proposal_count || 0));
+      } else {
+        reviewLink.textContent = continueLabel;
+      }
     } else {
       reviewCta.hidden = true;
     }
@@ -185,17 +221,21 @@
     if (fillEl) fillEl.style.width = (data.percent || 0) + "%";
     if (bar) bar.setAttribute("aria-valuenow", String(data.percent || 0));
     if (countEl) countEl.textContent = (data.done || 0) + " / " + (data.total || 0);
-    renderNameList(doneBox, doneList, data.file_done);
-    renderNameList(runningBox, runningList, data.file_running);
-    renderNameList(queuedBox, queuedList, data.file_queued);
     renderFileErrors(data.file_errors);
     renderReviewCta(data);
-    if (data.status === "review") {
-      stopped = true;
-      window.location.href = preferredReviewUrl(data);
+
+    const nextSig = data.files_sig || "";
+    if (nextSig && filesSig && nextSig !== filesSig) {
+      window.location.reload();
       return true;
     }
-    if (data.status === "failed") {
+    if (nextSig) filesSig = nextSig;
+
+    const busy = (data.running || 0) > 0 || (data.queued || 0) > 0;
+    if (spinner) spinner.hidden = !busy;
+    if (head && data.status === "review" && !busy) head.hidden = true;
+
+    if (data.status === "failed" && !busy) {
       stopped = true;
       root.classList.add("is-failed");
       if (errorEl) {
@@ -203,6 +243,11 @@
         errorEl.textContent = data.error || data.message || "";
       }
       if (actionsEl) actionsEl.hidden = false;
+      return true;
+    }
+    // Stay on this page when batch reaches review — user continues manually.
+    if (data.status === "review" && !busy) {
+      stopped = true;
       return true;
     }
     return false;
@@ -218,7 +263,6 @@
       const data = await res.json();
       if (apply(data)) return;
     } catch (err) {
-      // Network blip — keep polling; server queue continues
       if (statusEl) statusEl.textContent = String(err);
     }
     timer = setTimeout(poll, 1000);
@@ -229,7 +273,7 @@
     return;
   }
   if (root.dataset.status === "review") {
-    window.location.href = root.dataset.reviewUrl;
+    // Batch finished — no auto-redirect; CTA visible when review_ready.
     return;
   }
   poll();

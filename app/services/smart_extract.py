@@ -15,7 +15,12 @@ import httpx
 from PIL import Image
 
 from app.config import get_settings
-from app.services.draw_match import fingerprints_nearly_identical, value_fingerprint
+from app.services.draw_match import (
+    BIOCHEM_CODES,
+    HEMA_CODES,
+    fingerprints_nearly_identical,
+    value_fingerprint,
+)
 from app.services.proposal_filter import filter_proposals, is_junk_label
 
 logger = logging.getLogger(__name__)
@@ -25,6 +30,7 @@ NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
 SMART_SCHEMA_HINT = """
 Return ONLY valid JSON (no markdown) with this shape:
 {
+  "doc_kind": "lab_results"|"order_form"|"unknown",
   "draws": [
     {
       "drawn_on": "YYYY-MM-DD",
@@ -47,6 +53,13 @@ Return ONLY valid JSON (no markdown) with this shape:
 }
 Rules:
 - Czech/English laboratory blood report OR EHR screenshot (e.g. PC DOKTOR) showing lab results.
+- doc_kind:
+  - "lab_results" when the page shows MEASURED values (result table / EHR rows with numbers + units, often refs).
+  - "order_form" when this is a REQUEST / žádanka / order sheet: checkbox grids of tests to ORDER
+    (KO, KO+diff, PT, APTT, D-Dimery…), clinic stamps, patient sticker, diagnosis — WITHOUT a results
+    table of measured values. Checked boxes mean "order this test", NOT a numeric result.
+  - "unknown" if unclear.
+- If doc_kind is "order_form": return draws: [] and do NOT invent analytes/values/dates from test names or ticks.
 - Read ONLY what is visible. NEVER invent analytes, values, or dates. NEVER copy example JSON fields.
 - The schema numbers/names above are PLACEHOLDERS only — replace them with real rows from the image.
 - Set lab_name from the report/EHR header when visible (hospital / lab / clinic). Same lab_name on every draws[] entry when it is one report.
@@ -75,10 +88,16 @@ Rules:
 
 DATE_DISCOVER_HINT = """
 Return ONLY valid JSON (no markdown):
-{"layout": "single"|"multi_column"|"unknown", "dates": ["YYYY-MM-DD"], "notes": ""}
-Task: find draw/sample dates on this Czech lab report or EHR screenshot.
+{"doc_kind":"lab_results"|"order_form"|"unknown","layout":"single"|"multi_column"|"unknown","dates":["YYYY-MM-DD"],"notes":""}
+Task: classify this Czech lab page, then find draw/sample dates if it has results.
 
-layout:
+doc_kind:
+- "lab_results" if the page shows MEASURED lab values (Název/Výsledek/Jednotka/Meze, numeric result rows, or multi-column history with numbers).
+- "order_form" if this is a REQUEST / žádanka / order form: checkbox grids of tests to ORDER (KO, PT, APTT…), stamps, patient sticker — WITHOUT measured value+unit columns. Checked boxes are orders, not results.
+- "unknown" if unclear.
+If doc_kind is "order_form": set dates to [] and layout "unknown". Do NOT invent dates.
+
+layout (only when lab_results):
 - "multi_column" if there is a historical comparison TABLE with several DATE COLUMNS as headers (each column = another draw).
   Typical: Czech hospital HTO/biochem printouts (e.g. Příbram OpenLIMS) with dates like "14. 10. 2020 12:15" and "18. 5. 2016 12:45" ABOVE value columns, one marker list, multiple value columns.
   If you can see TWO OR MORE date headers above value columns, layout MUST be "multi_column" (never "single").
@@ -104,8 +123,10 @@ JSON_ONLY_SYSTEM = (
 
 DATE_DISCOVER_SHORT = """
 Return ONLY this tiny JSON (no other text):
-{"layout":"multi_column","dates":["YYYY-MM-DD","YYYY-MM-DD"]}
-List EVERY date COLUMN header above the lab value grid on this Czech report.
+{"doc_kind":"lab_results","layout":"multi_column","dates":["YYYY-MM-DD","YYYY-MM-DD"]}
+First: if page is a žádanka/order form with checkboxes and NO measured values →
+{"doc_kind":"order_form","layout":"unknown","dates":[]}.
+Else list EVERY date COLUMN header above the lab value grid.
 Czech day-first: D. M. YYYY → YYYY-MM-DD (middle number is MONTH).
 Example: "14. 10. 2020","18. 5. 2016","14. 9. 2010" → ["2020-10-14","2016-05-18","2010-09-14"].
 Never invent 2020-10-18 by mixing columns. If only one draw, layout "single" and one date.
@@ -238,7 +259,39 @@ def _normalize_drawn_on(raw: str) -> str | None:
     return _parse_date_token(raw or "")
 
 
+def _normalize_doc_kind(raw: Any) -> str:
+    s = str(raw or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "order": "order_form",
+        "orderform": "order_form",
+        "request": "order_form",
+        "request_form": "order_form",
+        "zadanka": "order_form",
+        "žádanka": "order_form",
+        "zadanka_vysetreni": "order_form",
+        "results": "lab_results",
+        "lab": "lab_results",
+        "lab_result": "lab_results",
+        "lab_report": "lab_results",
+        "report": "lab_results",
+        "result": "lab_results",
+    }
+    s = aliases.get(s, s)
+    if s in {"lab_results", "order_form", "unknown"}:
+        return s
+    return "unknown"
+
+
 def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
+    warnings = list(data.get("warnings") or [])
+    doc_kind = _normalize_doc_kind(
+        data.get("doc_kind") or data.get("document_type") or data.get("doc_type")
+    )
+    if doc_kind == "order_form":
+        if "order_form_no_results" not in warnings:
+            warnings.append("order_form_no_results")
+        return {"doc_kind": doc_kind, "draws": [], "warnings": warnings}
+
     draws_in = data.get("draws") or []
     draws_out: list[dict] = []
     for d in draws_in:
@@ -306,7 +359,10 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
                     "results": results_out,
                 }
             )
-    return {"draws": draws_out, "warnings": list(data.get("warnings") or [])}
+    out: dict[str, Any] = {"draws": draws_out, "warnings": warnings}
+    if doc_kind != "unknown":
+        out["doc_kind"] = doc_kind
+    return out
 
 
 def _draw_result_fingerprint(draw: dict[str, Any]) -> frozenset[tuple[str, float]]:
@@ -415,6 +471,30 @@ def looks_like_hallucinated_extract(proposals: list[dict]) -> bool:
     if all_zero and few_analytes and len(proposals) >= 3:
         return True
     return False
+
+
+def looks_like_order_form_hallucination(proposals: list[dict]) -> bool:
+    """CBC invented from žádanka: many hema rows, no refs, several zeros, almost no biochem."""
+    if len(proposals) < 8:
+        return False
+    hema = bio = zeros = refs = 0
+    for p in proposals:
+        code = str(p.get("marker_code") or "").strip().lower()
+        if code in HEMA_CODES:
+            hema += 1
+        if code in BIOCHEM_CODES:
+            bio += 1
+        try:
+            if p.get("value") is not None and abs(float(p["value"])) < 1e-12:
+                zeros += 1
+        except (TypeError, ValueError):
+            pass
+        if p.get("lab_ref_low") is not None or p.get("lab_ref_high") is not None:
+            refs += 1
+    if bio >= 2:
+        return False
+    # Invented KO from checkbox form — real KO printouts almost always show ref ranges.
+    return hema >= 8 and refs == 0 and zeros >= 2 and hema >= int(0.7 * len(proposals))
 
 
 def _looks_like_collapsed_multi_dates(dates: list[str]) -> bool:
@@ -584,26 +664,31 @@ def _finalize_discovery(layout: str, raw_dates: list[Any]) -> tuple[str, list[st
     return layout, dates
 
 
-def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
+def _discover_dates(pages: list[Path]) -> tuple[str, list[str], str]:
     last_text = ""
     attempts: list[tuple[list[dict], int]] = [
         ([{"type": "text", "text": DATE_DISCOVER_HINT}, *_image_content(pages)], 512),
         ([{"type": "text", "text": DATE_DISCOVER_SHORT}, *_image_content(pages)], 384),
     ]
-    best: tuple[str, list[str]] | None = None
+    best: tuple[str, list[str], str] | None = None
     for content, max_tokens in attempts:
         try:
             last_text = _nvidia_chat(content, max_tokens=max_tokens, temperature=0.0)
             data = _extract_json(last_text)
+            doc_kind = _normalize_doc_kind(
+                data.get("doc_kind") or data.get("document_type") or data.get("doc_type")
+            )
+            if doc_kind == "order_form":
+                return "unknown", [], "order_form"
             layout = str(data.get("layout") or "unknown").strip().lower()
             layout, dates = _finalize_discovery(layout, list(data.get("dates") or []))
             if _looks_like_history_columns(dates):
-                return "multi_column", dates
+                return "multi_column", dates, doc_kind or "lab_results"
             if layout == "single" and dates:
-                return layout, dates
+                return layout, dates, doc_kind or "lab_results"
             # Keep partial result but keep trying for real history columns.
             if dates and (best is None or len(dates) > len(best[1])):
-                best = (layout, dates)
+                best = (layout, dates, doc_kind)
             if layout == "multi_column" and not _looks_like_history_columns(dates):
                 logger.warning("Date discovery multi without year span: %s — retrying", dates)
                 continue
@@ -615,13 +700,13 @@ def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
         layout, dates = _finalize_discovery("unknown", scraped)
         if _looks_like_history_columns(dates):
             logger.info("Date discovery recovered via scrape: layout=%s dates=%s", layout, dates)
-            return "multi_column", dates
+            return "multi_column", dates, "lab_results"
         if dates and (best is None or len(dates) > len(best[1])):
-            best = (layout, dates)
-            logger.info("Date discovery scrape partial: layout=%s dates=%s", layout, dates)
+            best = (layout, dates, "unknown")
+
     if best:
         return best
-    return "unknown", []
+    return "unknown", [], "unknown"
 
 
 def _flatten_draws(parsed: dict[str, Any]) -> list[dict]:
@@ -749,10 +834,33 @@ def run_smart_extract(
 
         layout = "unknown"
         discovered: list[str] = []
+        doc_kind = "unknown"
         try:
-            layout, discovered = _discover_dates(pages)
+            layout, discovered, doc_kind = _discover_dates(pages)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Date discovery failed: %s", exc)
+
+        model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+        if doc_kind == "order_form":
+            empty = {"doc_kind": "order_form", "draws": [], "warnings": ["order_form_no_results"]}
+            text = json.dumps(empty, ensure_ascii=False)
+            logger.info("Smart extract: order form / žádanka — skipping result extract")
+            return (
+                text,
+                [],
+                {
+                    "engine": "nvidia",
+                    "model": model,
+                    "mode": "smart",
+                    "layout": "order_form",
+                    "doc_kind": "order_form",
+                    "dates": [],
+                    "discovered_dates": [],
+                    "lab_name": None,
+                    "workplace": None,
+                    "warnings": empty["warnings"],
+                },
+            )
 
         content = _build_extract_content(
             pages,
@@ -774,8 +882,18 @@ def run_smart_extract(
                 got_dates,
             )
             try:
-                layout2, discovered2 = _discover_dates(pages)
-                if _looks_like_history_columns(discovered2):
+                layout2, discovered2, doc_kind2 = _discover_dates(pages)
+                if doc_kind2 == "order_form":
+                    empty = {
+                        "doc_kind": "order_form",
+                        "draws": [],
+                        "warnings": ["order_form_no_results"],
+                    }
+                    text = json.dumps(empty, ensure_ascii=False)
+                    proposals, parsed = [], empty
+                    got_dates = []
+                    layout, discovered, doc_kind = "order_form", [], "order_form"
+                elif _looks_like_history_columns(discovered2):
                     layout, discovered = "multi_column", discovered2
                     content_fix = _build_extract_content(
                         pages,
@@ -927,8 +1045,26 @@ def run_smart_extract(
                     {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
                 )
 
+        # Order-form / žádanka: never invent CBC from checkboxes; skip single-draw retry
+        if parsed.get("doc_kind") == "order_form" or looks_like_order_form_hallucination(
+            proposals
+        ):
+            logger.info(
+                "Smart extract discarded as order form / žádanka (n=%s)",
+                len(proposals),
+            )
+            proposals = []
+            parsed = {
+                "doc_kind": "order_form",
+                "draws": [],
+                "warnings": ["order_form_no_results"],
+            }
+            got_dates = []
+            doc_kind = "order_form"
+            layout = "order_form"
+
         # Hallucination guard: one marker / zero values / date spam → single-draw retry
-        if looks_like_hallucinated_extract(proposals):
+        elif proposals and looks_like_hallucinated_extract(proposals):
             logger.warning(
                 "Smart extract looks hallucinated (layout=%s dates=%s n=%s); retrying single-draw",
                 layout,
@@ -947,7 +1083,18 @@ def run_smart_extract(
                 text3 = _nvidia_chat(content_single, max_tokens=8192)
                 parsed3 = _validate_smart_payload(_extract_json(text3))
                 props3 = _flatten_draws(parsed3)
-                if props3 and not looks_like_hallucinated_extract(props3):
+                if parsed3.get("doc_kind") == "order_form" or looks_like_order_form_hallucination(
+                    props3
+                ):
+                    text, proposals, parsed = text3, [], {
+                        "doc_kind": "order_form",
+                        "draws": [],
+                        "warnings": ["order_form_no_results"],
+                    }
+                    got_dates = []
+                    doc_kind = "order_form"
+                    layout = "order_form"
+                elif props3 and not looks_like_hallucinated_extract(props3):
                     text, proposals, parsed = text3, props3, parsed3
                     got_dates = sorted(
                         {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
@@ -966,13 +1113,15 @@ def run_smart_extract(
                 logger.warning("Smart single-draw retry failed: %s", exc)
 
         # Still garbage → empty (caller must not fall back to classic OCR)
-        if looks_like_hallucinated_extract(proposals):
+        if proposals and (
+            looks_like_hallucinated_extract(proposals)
+            or looks_like_order_form_hallucination(proposals)
+        ):
             logger.error("Smart extract still hallucinated; returning empty")
             proposals = []
             parsed = {"draws": [], "warnings": ["hallucinated_extract_discarded"]}
             got_dates = []
 
-        model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
         lab_name = None
         workplace = None
         for d in parsed.get("draws") or []:
@@ -987,6 +1136,7 @@ def run_smart_extract(
             "model": model,
             "mode": "smart",
             "layout": layout,
+            "doc_kind": doc_kind if doc_kind != "unknown" else parsed.get("doc_kind") or "unknown",
             "dates": got_dates,
             "discovered_dates": discovered,
             "lab_name": lab_name,
