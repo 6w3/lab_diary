@@ -2,6 +2,7 @@
 {% block title %}{{ t('trends_title') }}{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 <style>
   .wrap-trends { max-width: 1100px; }
   .chart-grid { display: grid; gap: 1.25rem; }
@@ -50,6 +51,16 @@ const condLabels = {
   no: "{{ t('no')|e }}",
 };
 
+/** Parse YYYY-MM-DD as local calendar date (avoids UTC shift). */
+function parseDay(d) {
+  if (d instanceof Date) return d;
+  const s = String(d || "");
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  const t = Date.parse(s);
+  return Number.isNaN(t) ? null : new Date(t);
+}
+
 function formatConditions(point) {
   if (!point) return [];
   const lines = [];
@@ -85,9 +96,20 @@ function tipBandPlugin(tipLow, tipHigh) {
 document.querySelectorAll('canvas[data-key]').forEach((el) => {
   const c = byKey[el.dataset.key];
   if (!c) return;
+  const rawDates = c.labels || (c.points || []).map((p) => p.date);
+  const times = rawDates.map(parseDay);
+  if (times.some((t) => !t)) return;
+
+  const xy = (ys) => times.map((t, i) => ({ x: t, y: ys[i] }));
+  // Tip lines span full time range (not only sample index slots).
+  const tipSpan = (y) => [
+    { x: times[0], y },
+    { x: times[times.length - 1], y },
+  ];
+
   const datasets = [{
     label: c.name,
-    data: c.values,
+    data: xy(c.values),
     borderColor: '#1f5c4a',
     backgroundColor: 'rgba(31,92,74,0.15)',
     tension: 0.2,
@@ -97,7 +119,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     if (c.tip_low != null) {
       datasets.push({
         label: 'tip low',
-        data: c.labels.map(() => c.tip_low),
+        data: tipSpan(c.tip_low),
         borderColor: 'rgba(31,92,74,0.45)',
         borderDash: [4, 4],
         pointRadius: 0,
@@ -107,7 +129,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     if (c.tip_high != null) {
       datasets.push({
         label: 'tip high',
-        data: c.labels.map(() => c.tip_high),
+        data: tipSpan(c.tip_high),
         borderColor: 'rgba(31,92,74,0.45)',
         borderDash: [4, 4],
         pointRadius: 0,
@@ -121,7 +143,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
   if (hasLab) {
     datasets.push({
       label: 'lab low',
-      data: labLows,
+      data: xy(labLows),
       borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
@@ -132,7 +154,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     });
     datasets.push({
       label: 'lab high',
-      data: labHighs,
+      data: xy(labHighs),
       borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
@@ -141,10 +163,19 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
       fill: false,
     });
   }
+
+  const spanMs = times[times.length - 1] - times[0];
+  const dayMs = 86400000;
+  let timeUnit = 'day';
+  if (spanMs > 900 * dayMs) timeUnit = 'year';
+  else if (spanMs > 120 * dayMs) timeUnit = 'month';
+  else if (spanMs > 21 * dayMs) timeUnit = 'week';
+
   new Chart(el, {
     type: 'line',
-    data: { labels: c.labels, datasets },
+    data: { datasets },
     options: {
+      parsing: false,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -152,6 +183,14 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
           intersect: false,
           filter: (item) => item.datasetIndex === 0,
           callbacks: {
+            title(items) {
+              if (!items.length) return '';
+              const t = items[0].parsed.x;
+              const d = new Date(t);
+              const dd = String(d.getDate()).padStart(2, '0');
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              return dd + '.' + mm + '.' + d.getFullYear();
+            },
             afterBody(items) {
               if (!items.length) return [];
               const idx = items[0].dataIndex;
@@ -168,8 +207,23 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
         },
       },
       scales: {
-        y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } }
-      }
+        x: {
+          type: 'time',
+          time: {
+            unit: timeUnit,
+            tooltipFormat: 'dd.MM.yyyy',
+            displayFormats: {
+              day: 'dd.MM.yy',
+              week: 'dd.MM.yy',
+              month: 'MM/yyyy',
+              quarter: 'MM/yyyy',
+              year: 'yyyy',
+            },
+          },
+          ticks: { autoSkip: true, maxRotation: 45, minRotation: 0 },
+        },
+        y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } },
+      },
     },
     plugins: [tipBandPlugin(c.tip_low, c.tip_high)],
   });
