@@ -6,6 +6,7 @@ from app.models import CustomMarker, Marker
 from app.services.label_aliases import learn_label_alias, load_user_aliases
 from app.services.markers import resolve_marker
 from app.services.ocr_parse import normalize_unit
+from app.services.units import correct_unit_by_magnitude
 
 
 def bind_marker_and_units(
@@ -42,6 +43,9 @@ def bind_marker_and_units(
     if matched:
         if not unit_n:
             unit_n = matched.default_unit
+        unit_n = correct_unit_by_magnitude(
+            matched.code, value, unit_n, lab_low=lab_low, lab_high=lab_high
+        )
         if learn_alias and label:
             learn_label_alias(db, user_id, label, matched.code, catalog)
         # Keep value + refs in the same unit the user confirmed (no silent rescale).

@@ -438,6 +438,71 @@ def to_canonical(
     return value, _norm(unit) or unit, False
 
 
+# Plausible magnitude bands for markers that share g/l ↔ g/dl and are often
+# mislabeled by VLMs (value stays, only unit label is corrected).
+_MARKER_UNIT_MAGNITUDE: dict[str, dict[str, tuple[float, float]]] = {
+    "hgb": {"g/l": (70.0, 250.0), "g/dl": (7.0, 25.0)},
+    "mchc": {"g/l": (250.0, 450.0), "g/dl": (25.0, 45.0)},
+}
+
+
+def _in_magnitude_band(x: float | None, lo: float, hi: float) -> bool:
+    if x is None:
+        return False
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return False
+    return lo <= v <= hi
+
+
+def correct_unit_by_magnitude(
+    marker_code: str | None,
+    value: float | None,
+    unit: str,
+    lab_low: float | None = None,
+    lab_high: float | None = None,
+) -> str:
+    """Fix unit label when value/refs match a sibling unit better (no rescale).
+
+    Example: HGB 13.5 with refs 12–16 labeled g/l → g/dl.
+    """
+    code = (marker_code or "").strip().lower()
+    unit_n = _norm(unit)
+    bands = _MARKER_UNIT_MAGNITUDE.get(code)
+    if not bands or value is None:
+        return unit_n or (unit or "")
+
+    def score(u: str) -> int:
+        lo, hi = bands[u]
+        s = 0
+        if _in_magnitude_band(value, lo, hi):
+            s += 2
+        if _in_magnitude_band(lab_low, lo, hi):
+            s += 1
+        if _in_magnitude_band(lab_high, lo, hi):
+            s += 1
+        return s
+
+    if unit_n not in bands:
+        # Unknown / empty label: pick best band if one clearly wins.
+        ranked = sorted(((score(u), u) for u in bands), reverse=True)
+        if ranked and ranked[0][0] >= 2:
+            return ranked[0][1]
+        return unit_n or (unit or "")
+
+    current = score(unit_n)
+    best_u, best_s = unit_n, current
+    for u, _band in bands.items():
+        if u == unit_n:
+            continue
+        s = score(u)
+        # Require clear win so borderline values stay put.
+        if s >= 2 and s >= current + 2:
+            best_u, best_s = u, s
+    return best_u
+
+
 def units_for_group(group_id: str | None) -> list[str]:
     if not group_id:
         return list(UNIT_CHOICES)

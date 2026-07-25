@@ -1,6 +1,7 @@
 from app.services.ocr_parse import normalize_unit
 from app.services.units import (
     convert_value,
+    correct_unit_by_magnitude,
     format_unit,
     is_molar_unit,
     same_quantity,
@@ -80,6 +81,15 @@ def test_hgb_unit_options_only_mass_group():
     assert "g/dl" in opts
     assert "ukat/l" not in opts
     assert unit_group_for_marker("hgb") == "mass_conc_g"
+
+
+def test_correct_hgb_g_dl_mislabeled_as_g_l():
+    assert correct_unit_by_magnitude("hgb", 13.5, "g/l", lab_low=12.0, lab_high=16.0) == "g/dl"
+    assert correct_unit_by_magnitude("hgb", 161.0, "g/l", lab_low=135.0, lab_high=174.0) == "g/l"
+    assert correct_unit_by_magnitude("mchc", 33.5, "g/l", lab_low=32.0, lab_high=36.0) == "g/dl"
+    assert correct_unit_by_magnitude("mchc", 335.0, "g/l", lab_low=320.0, lab_high=360.0) == "g/l"
+    # albumin-like values must not flip via hgb helper when wrong code absent
+    assert correct_unit_by_magnitude("albumin", 40.0, "g/l", lab_low=35.0, lab_high=53.0) == "g/l"
 
 
 def test_alt_and_ggt_share_enzyme_group():

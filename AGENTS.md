@@ -31,6 +31,7 @@ When the user gives **durable** process/product instructions (deploy, scope, uni
 
 - Quantity groups: `UNIT_GROUPS` + `MARKER_UNIT_GROUP` in `app/services/units.py`. Review unit select = **that group only** (custom → full `UNIT_CHOICES`). Detected unit outside group stays as extra option (no silent rewrite).
 - **Persist** report/review unit (normalize string only). Do **not** force `to_canonical` on confirm.
+- **Magnitude unit fix**: if Smart labels HGB/MCHC as `g/l` but value+refs are clearly `g/dl` scale (e.g. 13.5 / 12–16), `correct_unit_by_magnitude` rewrites the unit label only (no rescale) on enrich + confirm.
 - **Trends** / compare: `to_canonical` → marker `default_unit`.
 - Fraction (HCT/RDW): `l`/`l/l` → unit `1`; group `["%", "1"]`; value unchanged on unit normalize.
 - Bind priority: valid Smart `marker_code` → LIS brackets (`[HGB]`, …) / `GMT`→`ggt` → user alias → fuzzy. Smart gaps use fuzzy (no custom flood).

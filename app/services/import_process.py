@@ -16,7 +16,7 @@ from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import parse_iso_date
 from app.services.smart_extract import run_smart_extract
-from app.services.units import unit_options_for_marker
+from app.services.units import correct_unit_by_magnitude, unit_options_for_marker
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,24 @@ def enrich_proposals(
         unit = normalize_unit(p.get("unit") or "")
         if matched and not unit:
             unit = matched.default_unit
+        try:
+            value_f = float(p.get("value")) if p.get("value") is not None else None
+        except (TypeError, ValueError):
+            value_f = None
+        lab_low = p.get("lab_ref_low")
+        lab_high = p.get("lab_ref_high")
+        try:
+            lab_low_f = float(lab_low) if lab_low is not None and lab_low != "" else None
+        except (TypeError, ValueError):
+            lab_low_f = None
+        try:
+            lab_high_f = float(lab_high) if lab_high is not None and lab_high != "" else None
+        except (TypeError, ValueError):
+            lab_high_f = None
+        if matched:
+            unit = correct_unit_by_magnitude(
+                matched.code, value_f, unit, lab_low=lab_low_f, lab_high=lab_high_f
+            )
         drawn = _proposal_dt(p.get("proposed_drawn_on"))
         unit_opts = unit_options_for_marker(
             matched.code if matched else None,
