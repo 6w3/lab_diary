@@ -208,3 +208,30 @@ def test_result_is_duplicate_same_marker_value():
         value=6.0,
         unit="mmol/l",
     )
+
+
+def test_move_results_same_draw_noop():
+    from app.services.draw_organize import move_results_to_draw
+
+    db = _FakeDB()
+    moved, skipped = move_results_to_draw(
+        db,
+        user_id=1,
+        source_draw_id=1,
+        target_draw_id=1,
+        result_ids=[10],
+    )
+    assert moved == 0 and skipped == 0
+
+
+def test_merge_draw_same_noop():
+    from app.services.draw_organize import merge_draw_into
+
+    db = _FakeDB()
+    moved, skipped, deleted = merge_draw_into(
+        db,
+        user_id=1,
+        source_draw_id=3,
+        target_draw_id=3,
+    )
+    assert (moved, skipped, deleted) == (0, 0, False)

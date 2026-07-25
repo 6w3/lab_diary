@@ -13,6 +13,8 @@ from app.services.draw_organize import (
     apply_draw_conditions,
     attachments_for_draw,
     create_draw as create_blood_draw,
+    merge_draw_into,
+    move_results_to_draw,
 )
 from app.services.multi_date import unique_drawn_dates
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
@@ -82,7 +84,7 @@ def _display_results(draw: BloodDraw, locale: str):
                 id=r.id,
                 display_name=name,
                 value=r.value,
-                unit=r.unit,
+                unit=r.unit or "",
                 lab_ref_low=r.lab_ref_low,
                 lab_ref_high=r.lab_ref_high,
                 tip_low=tip_low,
@@ -170,6 +172,20 @@ def draw_detail(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, d
     if not draw:
         return redirect("/draws")
     markers = db.query(Marker).order_by(Marker.code).all()
+    other_draws = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.user_id == user.id, BloodDraw.id != draw.id)
+        .order_by(BloodDraw.drawn_at.desc())
+        .limit(50)
+        .all()
+    )
+    other_draw_options = [
+        SimpleNamespace(
+            id=d.id,
+            label=f"{d.drawn_at.strftime('%Y-%m-%d')} — {d.lab_name}",
+        )
+        for d in other_draws
+    ]
     return templates.TemplateResponse(
         request,
         "draws/detail.html",
@@ -180,6 +196,7 @@ def draw_detail(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, d
             markers=markers,
             confirmed_results=_display_results(draw, locale),
             linked_attachments=attachments_for_draw(draw),
+            other_draws=other_draw_options,
             smart_available=smart_enabled(),
         ),
     )
@@ -248,7 +265,7 @@ async def split_results(request: Request, db: DbDep, user: UserDep, draw_id: int
     if not draw:
         return redirect("/draws")
     form = await request.form()
-    selected = set(form.getlist("split_ids"))
+    selected = set(form.getlist("result_ids"))
     if not selected:
         request.session["flash"] = "Vyber výsledky k oddělení."
         return redirect(f"/draws/{draw_id}")
@@ -279,6 +296,64 @@ async def split_results(request: Request, db: DbDep, user: UserDep, draw_id: int
     request.session["flash"] = f"Odděleno {moved} výsledků do nového odběru."
     request.session["conditions_queue"] = [{"id": new_draw.id, "is_new": True}]
     return redirect("/import/conditions")
+
+
+@router.post("/{draw_id}/move")
+async def move_results(request: Request, db: DbDep, user: UserDep, draw_id: int):
+    draw = _get_owned_draw(db, user.id, draw_id)
+    if not draw:
+        return redirect("/draws")
+    form = await request.form()
+    selected = []
+    for raw_id in form.getlist("result_ids"):
+        try:
+            selected.append(int(raw_id))
+        except (TypeError, ValueError):
+            continue
+    try:
+        target_id = int(form.get("target_draw_id") or 0)
+    except (TypeError, ValueError):
+        target_id = 0
+    if not selected or not target_id:
+        request.session["flash"] = "Vyber výsledky a cílový odběr."
+        return redirect(f"/draws/{draw_id}")
+    moved, skipped = move_results_to_draw(
+        db,
+        user_id=user.id,
+        source_draw_id=draw.id,
+        target_draw_id=target_id,
+        result_ids=selected,
+    )
+    db.commit()
+    request.session["flash"] = f"Přesunuto {moved}, přeskočeno duplicit {skipped}."
+    return redirect(f"/draws/{target_id}" if moved else f"/draws/{draw_id}")
+
+
+@router.post("/{draw_id}/merge")
+async def merge_draw(request: Request, db: DbDep, user: UserDep, draw_id: int):
+    draw = _get_owned_draw(db, user.id, draw_id)
+    if not draw:
+        return redirect("/draws")
+    form = await request.form()
+    try:
+        target_id = int(form.get("target_draw_id") or 0)
+    except (TypeError, ValueError):
+        target_id = 0
+    if not target_id:
+        request.session["flash"] = "Vyber cílový odběr ke sloučení."
+        return redirect(f"/draws/{draw_id}")
+    moved, skipped, deleted = merge_draw_into(
+        db,
+        user_id=user.id,
+        source_draw_id=draw.id,
+        target_draw_id=target_id,
+    )
+    db.commit()
+    msg = f"Sloučeno {moved} výsledků, přeskočeno duplicit {skipped}."
+    if deleted:
+        msg += " Zdrojový odběr smazán."
+    request.session["flash"] = msg
+    return redirect(f"/draws/{target_id}")
 
 
 @router.get("/{draw_id}/ocr/{attachment_id}", response_class=HTMLResponse)
@@ -504,6 +579,37 @@ def add_result(
     return redirect(f"/draws/{draw_id}")
 
 
+@router.post("/{draw_id}/results/{result_id}/edit")
+def update_result(
+    db: DbDep,
+    user: UserDep,
+    draw_id: int,
+    result_id: int,
+    value: str = Form(...),
+    unit: str = Form(""),
+    lab_ref_low: str = Form(""),
+    lab_ref_high: str = Form(""),
+    notes: str = Form(""),
+):
+    draw = _get_owned_draw(db, user.id, draw_id)
+    if not draw:
+        return redirect("/draws")
+    row = db.get(ResultValue, result_id)
+    if not row or row.blood_draw_id != draw.id:
+        return redirect(f"/draws/{draw_id}")
+    try:
+        new_value = float(value)
+    except (TypeError, ValueError):
+        return redirect(f"/draws/{draw_id}")
+    row.value = new_value
+    row.unit = (unit or "").strip() or row.unit
+    row.lab_ref_low = _parse_float(lab_ref_low)
+    row.lab_ref_high = _parse_float(lab_ref_high)
+    row.notes = notes.strip() or None
+    db.commit()
+    return redirect(f"/draws/{draw_id}")
+
+
 @router.post("/{draw_id}/results/{result_id}/notes")
 def update_result_notes(
     db: DbDep,
@@ -512,6 +618,7 @@ def update_result_notes(
     result_id: int,
     notes: str = Form(""),
 ):
+    """Back-compat: notes-only update (prefer /edit)."""
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")

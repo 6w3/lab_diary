@@ -64,24 +64,20 @@ function formatConditions(point) {
   return lines;
 }
 
-function refPlugin(tipLow, tipHigh, labLow, labHigh) {
+function tipBandPlugin(tipLow, tipHigh) {
   return {
-    id: 'refBands',
+    id: 'tipBand',
     beforeDraw(chart) {
       const {ctx, chartArea, scales} = chart;
       if (!chartArea || !scales.y) return;
+      if (tipLow == null && tipHigh == null) return;
       const y = scales.y;
-      const drawBand = (lo, hi, color) => {
-        if (lo == null && hi == null) return;
-        const top = hi != null ? y.getPixelForValue(hi) : chartArea.top;
-        const bottom = lo != null ? y.getPixelForValue(lo) : chartArea.bottom;
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.fillRect(chartArea.left, Math.min(top, bottom), chartArea.right - chartArea.left, Math.abs(bottom - top));
-        ctx.restore();
-      };
-      drawBand(tipLow, tipHigh, 'rgba(31, 92, 74, 0.08)');
-      drawBand(labLow, labHigh, 'rgba(236, 87, 79, 0.06)');
+      const top = tipHigh != null ? y.getPixelForValue(tipHigh) : chartArea.top;
+      const bottom = tipLow != null ? y.getPixelForValue(tipLow) : chartArea.bottom;
+      ctx.save();
+      ctx.fillStyle = 'rgba(31, 92, 74, 0.08)';
+      ctx.fillRect(chartArea.left, Math.min(top, bottom), chartArea.right - chartArea.left, Math.abs(bottom - top));
+      ctx.restore();
     }
   };
 }
@@ -119,23 +115,29 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
       });
     }
   }
-  if (c.lab_low != null) {
+  const labLows = c.lab_lows || (c.points || []).map((p) => p.lab_low);
+  const labHighs = c.lab_highs || (c.points || []).map((p) => p.lab_high);
+  const hasLab = labLows.some((v) => v != null) || labHighs.some((v) => v != null);
+  if (hasLab) {
     datasets.push({
       label: 'lab low',
-      data: c.labels.map(() => c.lab_low),
-      borderColor: 'rgba(236,87,79,0.5)',
+      data: labLows,
+      borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
-      fill: false,
+      spanGaps: false,
+      stepped: 'middle',
+      fill: '+1',
+      backgroundColor: 'rgba(236,87,79,0.06)',
     });
-  }
-  if (c.lab_high != null) {
     datasets.push({
       label: 'lab high',
-      data: c.labels.map(() => c.lab_high),
-      borderColor: 'rgba(236,87,79,0.5)',
+      data: labHighs,
+      borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
+      spanGaps: false,
+      stepped: 'middle',
       fill: false,
     });
   }
@@ -153,7 +155,14 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
             afterBody(items) {
               if (!items.length) return [];
               const idx = items[0].dataIndex;
-              return formatConditions((c.points || [])[idx]);
+              const point = (c.points || [])[idx];
+              const lines = formatConditions(point);
+              if (point && (point.lab_low != null || point.lab_high != null)) {
+                const lo = point.lab_low != null ? point.lab_low : '—';
+                const hi = point.lab_high != null ? point.lab_high : '—';
+                lines.push('{{ t("lab_ref")|e }}: ' + lo + '–' + hi);
+              }
+              return lines;
             }
           }
         },
@@ -162,7 +171,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
         y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } }
       }
     },
-    plugins: [refPlugin(c.tip_low, c.tip_high, c.lab_low, c.lab_high)],
+    plugins: [tipBandPlugin(c.tip_low, c.tip_high)],
   });
 });
 </script>

@@ -186,6 +186,112 @@ def result_is_duplicate(
     return False
 
 
+def move_results_to_draw(
+    db,
+    *,
+    user_id: int,
+    source_draw_id: int,
+    target_draw_id: int,
+    result_ids: list[int],
+) -> tuple[int, int]:
+    """Move confirmed results to another owned draw. Returns (moved, skipped_dup)."""
+    from app.models import BloodDraw, ResultValue
+
+    if source_draw_id == target_draw_id or not result_ids:
+        return 0, 0
+    source = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.id == source_draw_id, BloodDraw.user_id == user_id)
+        .first()
+    )
+    target = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.id == target_draw_id, BloodDraw.user_id == user_id)
+        .first()
+    )
+    if not source or not target:
+        return 0, 0
+
+    moved = 0
+    skipped = 0
+    for rid in result_ids:
+        row = db.get(ResultValue, rid)
+        if not row or row.blood_draw_id != source.id or not row.confirmed:
+            continue
+        if result_is_duplicate(
+            db,
+            draw_id=target.id,
+            marker_code=row.marker_code,
+            custom_marker_id=row.custom_marker_id,
+            value=float(row.value),
+            unit=row.unit or "",
+        ):
+            skipped += 1
+            continue
+        row.blood_draw_id = target.id
+        if row.attachment_id:
+            link_attachment_to_draw(db, target.id, row.attachment_id)
+        moved += 1
+    return moved, skipped
+
+
+def merge_draw_into(
+    db,
+    *,
+    user_id: int,
+    source_draw_id: int,
+    target_draw_id: int,
+) -> tuple[int, int, bool]:
+    """Move all confirmed results + attachment links into target; delete empty source.
+
+    Returns (moved, skipped_dup, source_deleted).
+    """
+    from app.models import BloodDraw, ResultValue
+
+    if source_draw_id == target_draw_id:
+        return 0, 0, False
+    source = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.id == source_draw_id, BloodDraw.user_id == user_id)
+        .first()
+    )
+    target = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.id == target_draw_id, BloodDraw.user_id == user_id)
+        .first()
+    )
+    if not source or not target:
+        return 0, 0, False
+
+    for att in attachments_for_draw(source):
+        link_attachment_to_draw(db, target.id, att.id)
+
+    ids = [
+        r.id
+        for r in db.query(ResultValue)
+        .filter(ResultValue.blood_draw_id == source.id, ResultValue.confirmed.is_(True))
+        .all()
+    ]
+    moved, skipped = move_results_to_draw(
+        db,
+        user_id=user_id,
+        source_draw_id=source.id,
+        target_draw_id=target.id,
+        result_ids=ids,
+    )
+
+    remaining = (
+        db.query(ResultValue)
+        .filter(ResultValue.blood_draw_id == source.id)
+        .count()
+    )
+    deleted = False
+    if remaining == 0:
+        db.delete(source)
+        deleted = True
+    return moved, skipped, deleted
+
+
 def attachments_for_draw(draw) -> list:
     """Prefer M2M links; fall back to legacy blood_draw_id."""
     linked = [link.attachment for link in (draw.draw_attachments or []) if link.attachment]

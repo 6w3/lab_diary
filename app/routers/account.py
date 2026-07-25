@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
-from app.models import Attachment, BloodDraw
+from app.models import Attachment, BloodDraw, User
 from app.services.storage import delete_file
 
 router = APIRouter(prefix="/account", tags=["account"])
@@ -25,8 +25,11 @@ def account_page(request: Request, locale: LocaleDep, user: UserDep):
 def set_user_locale(db: DbDep, user: UserDep, locale: str = Form(...)):
     if locale not in {"cs", "en"}:
         locale = "cs"
-    user.locale = locale
-    db.commit()
+    # request.state.user is detached (middleware session closed) — mutate via DbDep
+    db_user = db.get(User, user.id)
+    if db_user:
+        db_user.locale = locale
+        db.commit()
     response = redirect("/account")
     response.set_cookie("locale", locale, max_age=60 * 60 * 24 * 365)
     return response
@@ -34,11 +37,14 @@ def set_user_locale(db: DbDep, user: UserDep, locale: str = Form(...)):
 
 @router.post("/delete")
 def delete_account(request: Request, db: DbDep, user: UserDep):
-    draw_ids = [d.id for d in db.query(BloodDraw).filter(BloodDraw.user_id == user.id).all()]
+    user_id = user.id
+    draw_ids = [d.id for d in db.query(BloodDraw).filter(BloodDraw.user_id == user_id).all()]
     if draw_ids:
         for att in db.query(Attachment).filter(Attachment.blood_draw_id.in_(draw_ids)).all():
             delete_file(att.storage_path)
-    db.delete(user)
-    db.commit()
+    db_user = db.get(User, user_id)
+    if db_user:
+        db.delete(db_user)
+        db.commit()
     request.session.clear()
     return redirect("/")

@@ -129,9 +129,8 @@ def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         points = collapse_points_per_draw(points, tip_low, tip_high)
         labels = [p["date"] for p in points]
         values = [p["value"] for p in points]
-        # Use latest non-null lab refs; tip from catalog
-        lab_low = next((p["lab_low"] for p in reversed(points) if p["lab_low"] is not None), None)
-        lab_high = next((p["lab_high"] for p in reversed(points) if p["lab_high"] is not None), None)
+        lab_lows = [p.get("lab_low") for p in points]
+        lab_highs = [p.get("lab_high") for p in points]
         unit = points[-1]["unit"] or meta.get("unit") or ""
         charts.append(
             {
@@ -143,8 +142,8 @@ def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
                 "labels": labels,
                 "values": values,
                 "points": points,
-                "lab_low": lab_low,
-                "lab_high": lab_high,
+                "lab_lows": lab_lows,
+                "lab_highs": lab_highs,
                 "tip_low": tip_low,
                 "tip_high": tip_high,
             }

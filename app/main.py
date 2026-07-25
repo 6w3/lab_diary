@@ -99,6 +99,8 @@ def home(request: Request, locale: LocaleDep, user: OptionalUserDep):
 
 @app.post("/locale")
 def set_locale_cookie(request: Request, locale: str = Form("cs")):
+    from urllib.parse import urlparse
+
     if locale not in {"cs", "en"}:
         locale = "cs"
     user = getattr(request.state, "user", None)
@@ -111,6 +113,15 @@ def set_locale_cookie(request: Request, locale: str = Form("cs")):
                 db.commit()
         finally:
             db.close()
-    response = redirect("/")
+    next_path = "/"
+    referer = request.headers.get("referer") or ""
+    if referer:
+        parsed = urlparse(referer)
+        req_host = urlparse(str(request.base_url)).netloc
+        if not parsed.netloc or parsed.netloc == req_host:
+            next_path = parsed.path or "/"
+            if parsed.query:
+                next_path = f"{next_path}?{parsed.query}"
+    response = redirect(next_path)
     response.set_cookie("locale", locale, max_age=60 * 60 * 24 * 365)
     return response

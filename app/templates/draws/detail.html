@@ -4,7 +4,7 @@
 <div class="row">
   <h1>{{ draw.drawn_at.strftime('%Y-%m-%d') }}</h1>
   <div>
-    <a class="btn secondary" href="/draws/{{ draw.id }}/edit">Edit</a>
+    <a class="btn secondary" href="/draws/{{ draw.id }}/edit">{{ t('edit') }}</a>
     <form method="post" action="/draws/{{ draw.id }}/delete" style="display:inline" onsubmit="return confirm('OK?')">
       <button type="submit" class="danger">{{ t('delete') }}</button>
     </form>
@@ -49,7 +49,8 @@
 
 <section class="card">
   <h2>{{ t('results') }}</h2>
-  <table>
+  <p class="muted">{{ t('edit_results_hint') }}</p>
+  <table class="results-edit">
     <thead>
       <tr>
         <th></th>
@@ -65,20 +66,29 @@
     <tbody>
       {% for r in confirmed_results %}
         <tr>
-          <td><input type="checkbox" name="split_ids" value="{{ r.id }}" form="split-form"></td>
-          <td>{{ r.display_name }}</td>
-          <td>{{ r.value }}</td>
-          <td>{{ r.unit }}</td>
-          <td>{% if r.lab_ref_low is not none or r.lab_ref_high is not none %}{{ r.lab_ref_low }}–{{ r.lab_ref_high }}{% endif %}</td>
-          <td>{% if r.tip_low is not none or r.tip_high is not none %}{{ r.tip_low }}–{{ r.tip_high }}{% endif %}</td>
           <td>
-            <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/notes" class="inline-form note-form">
-              <input type="text" name="notes" value="{{ r.notes or '' }}" placeholder="{{ t('result_note') }}">
-              <button type="submit" class="link">{{ t('save') }}</button>
-            </form>
+            <input type="checkbox" name="result_ids" value="{{ r.id }}" form="organize-form">
+            <form id="edit-r{{ r.id }}" method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/edit"></form>
+          </td>
+          <td>{{ r.display_name }}</td>
+          <td>
+            <input form="edit-r{{ r.id }}" type="number" step="any" name="value" value="{{ r.value }}" required style="width:5.5rem">
           </td>
           <td>
-            <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/delete">
+            <input form="edit-r{{ r.id }}" type="text" name="unit" value="{{ r.unit }}" style="width:5rem">
+          </td>
+          <td class="ref-inputs">
+            <input form="edit-r{{ r.id }}" type="number" step="any" name="lab_ref_low" value="{{ r.lab_ref_low if r.lab_ref_low is not none else '' }}" placeholder="low" style="width:4.5rem">
+            <span class="muted">–</span>
+            <input form="edit-r{{ r.id }}" type="number" step="any" name="lab_ref_high" value="{{ r.lab_ref_high if r.lab_ref_high is not none else '' }}" placeholder="high" style="width:4.5rem">
+          </td>
+          <td class="muted">{% if r.tip_low is not none or r.tip_high is not none %}{{ format_ref_range(r.tip_low, r.tip_high) }}{% endif %}</td>
+          <td>
+            <input form="edit-r{{ r.id }}" type="text" name="notes" value="{{ r.notes or '' }}" placeholder="{{ t('result_note') }}" style="min-width:8rem">
+          </td>
+          <td class="row-actions">
+            <button form="edit-r{{ r.id }}" type="submit" class="link">{{ t('save') }}</button>
+            <form method="post" action="/draws/{{ draw.id }}/results/{{ r.id }}/delete" onsubmit="return confirm('OK?')">
               <button type="submit" class="link">{{ t('delete') }}</button>
             </form>
           </td>
@@ -86,11 +96,30 @@
       {% endfor %}
     </tbody>
   </table>
-  <form method="post" action="/draws/{{ draw.id }}/split" id="split-form">
+  <form method="post" action="/draws/{{ draw.id }}/split" id="organize-form" class="organize-form">
     <p>
       <button type="submit" class="secondary">{{ t('split_selected') }}</button>
       <span class="muted">{{ t('split_selected_hint') }}</span>
     </p>
+    {% if other_draws %}
+    <p class="organize-merge">
+      <label>
+        {{ t('target_draw') }}
+        <select name="target_draw_id">
+          <option value="">—</option>
+          {% for d in other_draws %}
+          <option value="{{ d.id }}">{{ d.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="secondary" formaction="/draws/{{ draw.id }}/move">{{ t('move_selected') }}</button>
+      <button type="submit" class="secondary" formaction="/draws/{{ draw.id }}/merge"
+              onclick="return confirm('{{ t('merge_draw_confirm') }}')">{{ t('merge_whole_draw') }}</button>
+    </p>
+    <p class="muted">{{ t('merge_draw_hint') }}</p>
+    {% else %}
+    <p class="muted">{{ t('no_other_draws') }}</p>
+    {% endif %}
   </form>
 
   <h3>{{ t('add_result') }}</h3>

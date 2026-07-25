@@ -106,6 +106,13 @@ th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: le
 #review-table select[name^="marker_code"] { min-width: 11rem; max-width: 16rem; }
 #review-table input[name^="label_"] { min-width: 8rem; }
 .inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.results-edit input[type="number"],
+.results-edit input[type="text"] { padding: 0.35rem 0.45rem; }
+.results-edit .ref-inputs { white-space: nowrap; }
+.results-edit .row-actions { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
+.results-edit td { vertical-align: middle; }
+.organize-form { display: grid; gap: 0.75rem; margin-top: 1rem; }
+.organize-merge { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: end; }
 .note-form { flex-wrap: nowrap; align-items: center; }
 .note-form input[type="text"] { min-width: 8rem; flex: 1; }
 .locale-form { margin: 0; }

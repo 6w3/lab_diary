@@ -9,6 +9,7 @@ from starlette.responses import RedirectResponse
 from app.db import get_db
 from app.i18n import t
 from app.models import User
+from app.services.ref_range import format_ref_range
 
 
 def get_locale(request: Request) -> str:
@@ -59,6 +60,7 @@ def template_context(request: Request, locale: str, **extra):
         "locale": locale,
         "user": user,
         "t": lambda key, **kw: t(locale, key, **kw),
+        "format_ref_range": lambda low, high: format_ref_range(low, high, locale=locale),
         "disclaimer": t(locale, "disclaimer"),
         "flash": flash,
         **extra,
