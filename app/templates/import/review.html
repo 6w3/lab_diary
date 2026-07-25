@@ -2,6 +2,16 @@
 {% block title %}{{ t('ocr_review') }}{% endblock %}
 {% block content %}
 <h1>{{ t('ocr_review') }}</h1>
+{% if file_errors %}
+  <div class="card error-box">
+    <p><strong>{{ t('import_file_errors_title') }}</strong></p>
+    <ul>
+      {% for e in file_errors %}
+        <li><strong>{{ e.filename }}</strong>: {{ e.error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
 {% if multi_date %}
   <p class="muted">{{ t('multi_date_hint') }}</p>
   <p><strong>{{ t('detected_dates') }}:</strong> {{ detected_dates | join(', ') }}</p>

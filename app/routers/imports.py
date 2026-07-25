@@ -106,15 +106,43 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         .all()
     )
     total = len(atts)
+    failed_atts = [a for a in atts if a.ocr_status == "failed"]
+    done_ok = sum(1 for a in atts if a.ocr_status == "done")
     done = sum(1 for a in atts if a.ocr_status in {"done", "failed", "skipped"})
+    running = sum(1 for a in atts if a.ocr_status in {"pending", "processing"})
     current = next((a for a in atts if a.ocr_status == "processing"), None)
     if current is None:
         current = next((a for a in atts if a.ocr_status == "pending"), None)
     filename = current.filename if current else ""
+
+    payload = {}
+    try:
+        payload = json.loads(job.proposals_json or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    file_errors = list(payload.get("file_errors") or [])
+    if not file_errors and failed_atts:
+        file_errors = [
+            {
+                "attachment_id": a.id,
+                "filename": a.filename,
+                "error": (a.ocr_raw_text or "failed")[:500],
+            }
+            for a in failed_atts
+        ]
+
     if job.status == "review":
         message = i18n_t(locale, "import_progress_done")
     elif job.status == "failed":
         message = i18n_t(locale, "import_progress_failed")
+    elif failed_atts and running:
+        message = i18n_t(
+            locale,
+            "import_progress_partial",
+            done=str(done_ok),
+            failed=str(len(failed_atts)),
+            running=str(running),
+        )
     elif current:
         message = i18n_t(
             locale,
@@ -125,15 +153,25 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         )
     else:
         message = i18n_t(locale, "import_progress_recognizing")
+
+    error = None
+    if job.status == "failed":
+        error = job.ocr_raw_text or message
+    elif file_errors and job.status == "review":
+        error = None
+
     return {
         "status": job.status,
         "done": done,
+        "done_ok": done_ok,
+        "failed": len(failed_atts),
         "total": total,
         "percent": int(round(100 * done / total)) if total else 0,
         "current_file": filename,
         "message": message,
         "review_url": f"/import/{job.id}/review" if job.status == "review" else None,
-        "error": job.ocr_raw_text if job.status == "failed" else None,
+        "error": error,
+        "file_errors": file_errors,
         "server_queue": True,
     }
 
@@ -339,6 +377,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         return redirect("/draws")
     payload = json.loads(job.proposals_json or "{}")
     proposals = payload.get("proposals") or []
+    file_errors = payload.get("file_errors") or []
     detected_dates = payload.get("detected_dates") or unique_drawn_dates(proposals)
     multi_date = len(detected_dates) > 1
     lab_name = payload.get("lab_name") or "Laboratoř"
@@ -352,6 +391,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             locale,
             job=job,
             proposals=proposals,
+            file_errors=file_errors,
             groups=groups,
             lab_name=lab_name,
             unit_choices=UNIT_CHOICES,

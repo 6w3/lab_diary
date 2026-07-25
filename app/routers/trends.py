@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -71,7 +71,17 @@ def _series_point(result: ResultValue, draw: BloodDraw, marker: Marker | None) -
 
 
 @router.get("/trends", response_class=HTMLResponse)
-def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
+def trends(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    view: str = Query("charts"),
+):
+    view_norm = (view or "charts").strip().lower()
+    if view_norm not in ("charts", "table"):
+        view_norm = "charts"
+
     rows = (
         db.query(ResultValue, BloodDraw)
         .join(BloodDraw, ResultValue.blood_draw_id == BloodDraw.id)
@@ -167,5 +177,6 @@ def trends(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
             chart_groups=grouped,
             charts_json=json.dumps(charts, ensure_ascii=False),
             has_charts=bool(charts),
+            view=view_norm,
         ),
     )

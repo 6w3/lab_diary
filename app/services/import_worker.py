@@ -5,15 +5,17 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
 
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Attachment, ImportJob
 from app.services.import_process import (
     claim_next_attachment,
+    fail_timed_out_attachment,
+    finish_job_if_idle,
     maybe_finalize_idle_jobs,
     process_claimed_attachment,
+    record_file_failure,
     recover_stuck_attachments,
 )
 
@@ -23,9 +25,11 @@ _lock = threading.Lock()
 _started = False
 _stop = threading.Event()
 _wake = threading.Event()
-_executor: ThreadPoolExecutor | None = None
 _dispatch_thread: threading.Thread | None = None
 _inflight = 0
+_abandoned = 0  # timed-out threads still running (do not block new claims)
+_claim_started: dict[int, float] = {}
+_abandoned_ids: set[int] = set()
 
 
 def kick_import_worker() -> None:
@@ -35,14 +39,13 @@ def kick_import_worker() -> None:
 
 def start_import_worker() -> None:
     """Start background dispatcher + recover stuck rows. Idempotent."""
-    global _started, _executor, _dispatch_thread
+    global _started, _dispatch_thread
     with _lock:
         if _started:
             kick_import_worker()
             return
         settings = get_settings()
         max_workers = max(1, int(getattr(settings, "import_worker_concurrency", 2) or 2))
-        _executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="import")
         _stop.clear()
         _started = True
         _dispatch_thread = threading.Thread(
@@ -65,16 +68,12 @@ def start_import_worker() -> None:
 
 
 def stop_import_worker() -> None:
-    global _started, _executor, _dispatch_thread
+    global _started, _dispatch_thread
     _stop.set()
     _wake.set()
     with _lock:
-        ex = _executor
-        _executor = None
         _started = False
         _dispatch_thread = None
-    if ex is not None:
-        ex.shutdown(wait=False, cancel_futures=False)
 
 
 def _max_workers() -> int:
@@ -82,16 +81,59 @@ def _max_workers() -> int:
     return max(1, int(getattr(settings, "import_worker_concurrency", 2) or 2))
 
 
+def _file_timeout_sec() -> int:
+    settings = get_settings()
+    return max(60, int(getattr(settings, "import_file_timeout_sec", 720) or 720))
+
+
+def _reclaim_timed_out() -> int:
+    """Soft-fail hung attachments; free effective slots so the batch continues."""
+    global _abandoned
+    timeout = _file_timeout_sec()
+    now = time.time()
+    overdue: list[int] = []
+    with _lock:
+        for att_id, started in list(_claim_started.items()):
+            if now - started >= timeout and att_id not in _abandoned_ids:
+                overdue.append(att_id)
+    n = 0
+    for att_id in overdue:
+        err = f"timed_out after {timeout}s"
+        db = SessionLocal()
+        try:
+            changed = fail_timed_out_attachment(db, att_id, error=err)
+        except Exception:  # noqa: BLE001
+            logger.exception("Timeout reclaim failed att=%s", att_id)
+            changed = False
+        finally:
+            db.close()
+        if not changed:
+            continue
+        with _lock:
+            _claim_started.pop(att_id, None)
+            if att_id not in _abandoned_ids:
+                _abandoned_ids.add(att_id)
+                _abandoned += 1
+        n += 1
+        logger.warning("Import attachment timed out att=%s", att_id)
+    if n:
+        kick_import_worker()
+    return n
+
+
 def _dispatch_loop() -> None:
     global _inflight
     while not _stop.is_set():
+        _reclaim_timed_out()
         max_w = _max_workers()
         claimed_any = False
         while not _stop.is_set():
             with _lock:
-                slots = max_w - _inflight
-                ex = _executor
-            if slots <= 0 or ex is None:
+                if not _started:
+                    return
+                effective = max(0, _inflight - _abandoned)
+                slots = max_w - effective
+            if slots <= 0:
                 break
             db = SessionLocal()
             try:
@@ -107,18 +149,15 @@ def _dispatch_loop() -> None:
             att_id, job_id, storage_path, filename, mode = claimed
             with _lock:
                 _inflight += 1
-            fut = ex.submit(
-                _run_claimed,
-                att_id,
-                job_id,
-                storage_path,
-                filename,
-                mode,
-            )
-            fut.add_done_callback(_on_done)
+                _claim_started[att_id] = time.time()
+            threading.Thread(
+                target=_run_claimed,
+                name=f"import-att-{att_id}",
+                args=(att_id, job_id, storage_path, filename, mode),
+                daemon=True,
+            ).start()
 
         if not claimed_any:
-            # Also finalize jobs left idle (e.g. after recover)
             db = SessionLocal()
             try:
                 maybe_finalize_idle_jobs(db)
@@ -132,14 +171,14 @@ def _dispatch_loop() -> None:
             time.sleep(0.05)
 
 
-def _on_done(fut: Future) -> None:
-    global _inflight
-    try:
-        fut.result()
-    except Exception:  # noqa: BLE001
-        logger.exception("Import worker task crashed")
+def _task_finished(att_id: int) -> None:
+    global _inflight, _abandoned
     with _lock:
         _inflight = max(0, _inflight - 1)
+        _claim_started.pop(att_id, None)
+        if att_id in _abandoned_ids:
+            _abandoned_ids.discard(att_id)
+            _abandoned = max(0, _abandoned - 1)
     kick_import_worker()
 
 
@@ -165,15 +204,17 @@ def _run_claimed(
         try:
             att = db.get(Attachment, att_id)
             job = db.get(ImportJob, job_id)
-            if att and att.ocr_status == "processing":
+            if att and job and att.ocr_status == "processing" and job.status == "processing":
+                record_file_failure(db, att=att, job=job, error="worker_crash")
+                finish_job_if_idle(db, job)
+                db.commit()
+            elif att and att.ocr_status == "processing":
                 att.ocr_status = "failed"
                 att.ocr_raw_text = "worker_crash"
-            if job and job.status == "processing":
-                job.status = "failed"
-                job.ocr_raw_text = "worker_crash"
-            db.commit()
+                db.commit()
         except Exception:  # noqa: BLE001
             logger.exception("Failed to mark crashed attachment")
             db.rollback()
     finally:
         db.close()
+        _task_finished(att_id)

@@ -129,38 +129,133 @@ def finalize_job(db: Session, job: ImportJob) -> None:
     raw_parts = payload.get("raw_parts") or []
     job.ocr_raw_text = "\n\n".join(raw_parts) if raw_parts else job.ocr_raw_text
     atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
+    file_errors = list(payload.get("file_errors") or [])
     save_job_payload(
         job,
         {
             "lab_name": default_lab,
             "proposals": enriched,
             "detected_dates": detected_dates,
+            "file_errors": file_errors,
             "extract_meta": {
                 "source": job.extract_mode,
                 "dates": detected_dates,
                 "lab_name": detected_lab or None,
                 "file_count": len(atts),
+                "failed_count": len(file_errors),
             },
         },
     )
     job.status = "review"
 
 
+def record_file_failure(
+    db: Session,
+    *,
+    att: Attachment,
+    job: ImportJob,
+    error: str,
+) -> None:
+    """Mark one attachment failed; keep job processing so the batch can continue."""
+    msg = (error or "extract_failed").strip() or "extract_failed"
+    att.ocr_status = "failed"
+    att.ocr_raw_text = msg[:2000]
+    payload = job_payload(job)
+    errs = [e for e in (payload.get("file_errors") or []) if e.get("attachment_id") != att.id]
+    errs.append(
+        {
+            "attachment_id": att.id,
+            "filename": att.filename,
+            "error": msg[:500],
+        }
+    )
+    payload["file_errors"] = errs
+    save_job_payload(job, payload)
+
+
+def _active_attachment_count(db: Session, job_id: int, *, exclude_id: int | None = None) -> int:
+    q = db.query(Attachment).filter(
+        Attachment.import_job_id == job_id,
+        Attachment.ocr_status.in_(("pending", "processing")),
+    )
+    if exclude_id is not None:
+        q = q.filter(Attachment.id != exclude_id)
+    return q.count()
+
+
+def _done_attachment_count(db: Session, job_id: int) -> int:
+    return (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job_id, Attachment.ocr_status == "done")
+        .count()
+    )
+
+
+def finish_job_if_idle(db: Session, job: ImportJob) -> bool:
+    """If no pending/processing left: review (partial OK) or failed (all files failed)."""
+    if job.status != "processing":
+        return False
+    if _active_attachment_count(db, job.id):
+        return False
+    done = _done_attachment_count(db, job.id)
+    if done:
+        finalize_job(db, job)
+        return True
+    payload = job_payload(job)
+    errs = payload.get("file_errors") or []
+    if errs:
+        job.ocr_raw_text = "\n".join(
+            f"{e.get('filename') or 'file'}: {e.get('error') or 'failed'}" for e in errs
+        )[:2000]
+    else:
+        job.ocr_raw_text = job.ocr_raw_text or "All files failed"
+    job.status = "failed"
+    return True
+
+
 def recover_stuck_attachments(db: Session) -> int:
-    """Reset attachments left in 'processing' after crash/restart → pending."""
+    """Recover attachments left in 'processing' after crash/restart.
+
+    If the job already has successful files, soft-fail hung ones so partial review unlocks.
+    Otherwise reset to pending for a clean retry.
+    """
     stuck = (
         db.query(Attachment)
         .filter(Attachment.ocr_status == "processing")
         .all()
     )
     n = 0
+    jobs_to_finish: set[int] = set()
     for att in stuck:
-        att.ocr_status = "pending"
+        job = db.get(ImportJob, att.import_job_id) if att.import_job_id else None
+        if job and job.status == "processing" and _done_attachment_count(db, job.id) > 0:
+            record_file_failure(db, att=att, job=job, error="interrupted_by_restart")
+            jobs_to_finish.add(job.id)
+        else:
+            att.ocr_status = "pending"
         n += 1
+    for job_id in jobs_to_finish:
+        job = db.get(ImportJob, job_id)
+        if job:
+            finish_job_if_idle(db, job)
     if n:
         db.commit()
         logger.info("Recovered %s stuck import attachment(s)", n)
     return n
+
+
+def fail_timed_out_attachment(db: Session, att_id: int, *, error: str) -> bool:
+    """Soft-fail a hung processing attachment so the batch can continue. Returns True if changed."""
+    att = db.get(Attachment, att_id)
+    if not att or att.ocr_status != "processing" or not att.import_job_id:
+        return False
+    job = db.get(ImportJob, att.import_job_id)
+    if not job or job.status != "processing":
+        return False
+    record_file_failure(db, att=att, job=job, error=error)
+    finish_job_if_idle(db, job)
+    db.commit()
+    return True
 
 
 def claim_next_attachment(db: Session) -> tuple[int, int, str, str, str] | None:
@@ -223,27 +318,8 @@ def maybe_finalize_idle_jobs(db: Session) -> int:
     jobs = db.query(ImportJob).filter(ImportJob.status == "processing").all()
     n = 0
     for job in jobs:
-        active = (
-            db.query(Attachment)
-            .filter(
-                Attachment.import_job_id == job.id,
-                Attachment.ocr_status.in_(("pending", "processing")),
-            )
-            .count()
-        )
-        if active == 0:
-            # Only finalize if at least one file finished (avoid empty upload race)
-            done = (
-                db.query(Attachment)
-                .filter(
-                    Attachment.import_job_id == job.id,
-                    Attachment.ocr_status == "done",
-                )
-                .count()
-            )
-            if done:
-                finalize_job(db, job)
-                n += 1
+        if finish_job_if_idle(db, job):
+            n += 1
     if n:
         db.commit()
     return n
@@ -271,13 +347,14 @@ def process_claimed_attachment(
         logger.exception("Import extract failed att=%s job=%s", att_id, job_id)
         att = db.get(Attachment, att_id)
         job = db.get(ImportJob, job_id)
-        if att:
+        if att and job and att.ocr_status == "processing" and job.status == "processing":
+            record_file_failure(db, att=att, job=job, error=str(exc))
+            finish_job_if_idle(db, job)
+            db.commit()
+        elif att and att.ocr_status == "processing":
             att.ocr_status = "failed"
-            att.ocr_raw_text = str(exc)
-        if job and job.status == "processing":
-            job.status = "failed"
-            job.ocr_raw_text = str(exc)
-        db.commit()
+            att.ocr_raw_text = str(exc)[:2000]
+            db.commit()
         return {"ok": False, "error": str(exc)}
 
     job = (
@@ -292,10 +369,8 @@ def process_claimed_attachment(
         .with_for_update()
         .one()
     )
-    if job.status == "failed":
-        att.ocr_status = "done"
-        att.ocr_raw_text = raw
-        db.commit()
+    # Timed out / soft-failed / job already finished while extract ran.
+    if att.ocr_status != "processing" or job.status != "processing":
         return {"ok": True, "skipped_merge": True}
 
     att.ocr_raw_text = raw
@@ -314,16 +389,7 @@ def process_claimed_attachment(
         payload["detected_lab"] = lab
     save_job_payload(job, payload)
 
-    active = (
-        db.query(Attachment)
-        .filter(
-            Attachment.import_job_id == job.id,
-            Attachment.ocr_status.in_(("pending", "processing")),
-            Attachment.id != att.id,
-        )
-        .count()
-    )
-    if active == 0:
-        finalize_job(db, job)
+    if _active_attachment_count(db, job.id, exclude_id=att.id) == 0:
+        finish_job_if_idle(db, job)
     db.commit()
     return {"ok": True}

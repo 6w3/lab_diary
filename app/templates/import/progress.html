@@ -14,6 +14,11 @@
     <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
   </div>
   <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
+  <ul class="error-list muted" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
+    {% for e in progress.file_errors or [] %}
+      <li><strong>{{ e.filename }}</strong>: {{ e.error }}</li>
+    {% endfor %}
+  </ul>
   <p class="error" id="progress-error" {% if progress.status != 'failed' %}hidden{% endif %}>{{ progress.error or progress.message }}</p>
   <p id="progress-actions" {% if progress.status != 'failed' %}hidden{% endif %}>
     <a class="btn" href="/import">{{ t('upload_report') }}</a>
@@ -28,16 +33,38 @@
   const fillEl = document.getElementById("progress-fill");
   const countEl = document.getElementById("progress-count");
   const errorEl = document.getElementById("progress-error");
+  const fileErrEl = document.getElementById("progress-file-errors");
   const actionsEl = document.getElementById("progress-actions");
   const bar = root.querySelector(".progress-bar");
   let stopped = false;
   let timer = null;
+
+  function renderFileErrors(errors) {
+    if (!fileErrEl) return;
+    const list = Array.isArray(errors) ? errors : [];
+    if (!list.length) {
+      fileErrEl.hidden = true;
+      fileErrEl.innerHTML = "";
+      return;
+    }
+    fileErrEl.hidden = false;
+    fileErrEl.innerHTML = list.map(function (e) {
+      const name = (e.filename || "file").replace(/[<>&]/g, function (c) {
+        return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
+      });
+      const err = String(e.error || "failed").replace(/[<>&]/g, function (c) {
+        return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
+      });
+      return "<li><strong>" + name + "</strong>: " + err + "</li>";
+    }).join("");
+  }
 
   function apply(data) {
     if (statusEl) statusEl.textContent = data.message || "";
     if (fillEl) fillEl.style.width = (data.percent || 0) + "%";
     if (bar) bar.setAttribute("aria-valuenow", String(data.percent || 0));
     if (countEl) countEl.textContent = (data.done || 0) + " / " + (data.total || 0);
+    renderFileErrors(data.file_errors);
     if (data.status === "review" && data.review_url) {
       stopped = true;
       window.location.href = data.review_url;

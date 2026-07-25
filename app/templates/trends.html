@@ -1,23 +1,112 @@
 {% extends "base.html" %}
 {% block title %}{{ t('trends_title') }}{% endblock %}
 {% block head %}
+{% if view == 'charts' and has_charts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+{% endif %}
 <style>
   .wrap-trends { max-width: 1100px; }
+  .trends-tabs {
+    display: flex;
+    gap: 0.75rem;
+    margin: 0.5rem 0 1rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.35rem;
+  }
+  .trends-tabs a {
+    color: var(--muted);
+    text-decoration: none;
+    padding: 0.2rem 0.15rem;
+    border-bottom: 2px solid transparent;
+  }
+  .trends-tabs a[aria-current="page"] {
+    color: var(--text);
+    border-bottom-color: var(--text);
+    font-weight: 600;
+  }
   .chart-grid { display: grid; gap: 1.25rem; }
   .chart-card { border: 1px solid var(--border); padding: 0.85rem 1rem 0.5rem; }
   .chart-card h3 { margin: 0 0 0.35rem; font-size: 1.05rem; }
   .chart-card .meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.5rem; }
   .chart-card canvas { max-height: 220px; }
   .cat-heading { margin: 1.75rem 0 0.75rem; font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+  .trend-marker { margin: 0 0 1.1rem; }
+  .trend-marker h3 { margin: 0 0 0.35rem; font-size: 0.98rem; }
+  .trend-marker .meta { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+  .trend-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .trend-table th,
+  .trend-table td {
+    padding: 0.22rem 0.45rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  .trend-table th { color: var(--muted); font-weight: 500; }
+  .trend-table .out-of-range { color: #b42318; font-weight: 600; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="wrap-trends">
 <h1>{{ t('trends_title') }}</h1>
+{% if has_charts %}
+<nav class="trends-tabs" aria-label="{{ t('trends_title') }}">
+  <a href="/trends" {% if view == 'charts' %}aria-current="page"{% endif %}>{{ t('trends_tab_charts') }}</a>
+  <a href="/trends?view=table" {% if view == 'table' %}aria-current="page"{% endif %}>{{ t('trends_tab_table') }}</a>
+</nav>
+{% endif %}
 {% if not has_charts %}
   <p>{{ t('trends_empty') }}</p>
+{% elif view == 'table' %}
+  <p class="muted">{{ t('trends_table_hint') }}</p>
+  {% for group in chart_groups %}
+    <h2 class="cat-heading">{{ group.category_label }}</h2>
+    {% for c in group.charts %}
+      <section class="trend-marker">
+        <h3>{{ c.name }} <span class="meta">({{ c.unit }})</span></h3>
+        <table class="trend-table">
+          <thead>
+            <tr>
+              <th>{{ t('drawn_at') }}</th>
+              <th>{{ t('value') }}</th>
+              <th>{{ t('unit') }}</th>
+              <th>{{ t('lab_ref') }}</th>
+              <th>{{ t('app_tip_ref') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in c.points %}
+              {% set out_lab = (p.lab_low is not none and p.value < p.lab_low) or (p.lab_high is not none and p.value > p.lab_high) %}
+              {% set out_tip = (p.tip_low is not none and p.value < p.tip_low) or (p.tip_high is not none and p.value > p.tip_high) %}
+              <tr>
+                <td><a href="/draws/{{ p.draw_id }}">{{ p.date }}</a></td>
+                <td class="{% if out_lab or out_tip %}out-of-range{% endif %}">{{ p.value }}</td>
+                <td>{{ p.unit or c.unit }}</td>
+                <td>
+                  {% if p.lab_low is not none or p.lab_high is not none %}
+                    {{ p.lab_low if p.lab_low is not none else '—' }}–{{ p.lab_high if p.lab_high is not none else '—' }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if p.tip_low is not none or p.tip_high is not none %}
+                    {{ p.tip_low if p.tip_low is not none else '—' }}–{{ p.tip_high if p.tip_high is not none else '—' }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    {% endfor %}
+  {% endfor %}
 {% else %}
   <p class="muted">{{ t('trends_all_hint') }}</p>
   {% for group in chart_groups %}
@@ -33,7 +122,7 @@
   {% endfor %}
 {% endif %}
 </div>
-{% if has_charts %}
+{% if has_charts and view == 'charts' %}
 <script>
 const charts = {{ charts_json | safe }};
 const byKey = Object.fromEntries(charts.map(c => [c.key, c]));

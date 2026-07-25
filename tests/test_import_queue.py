@@ -1,46 +1,160 @@
 """Tests for import queue helpers (no live DB)."""
 
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from app.services.import_process import recover_stuck_attachments
+from app.services.import_process import (
+    finish_job_if_idle,
+    job_payload,
+    record_file_failure,
+    recover_stuck_attachments,
+)
 
 
-class _FakeQuery:
+def _clause_values(arg) -> set:
+    out: set = set()
+    right = getattr(arg, "right", None)
+    val = getattr(right, "value", None) if right is not None else None
+    if isinstance(val, (list, tuple, set)):
+        out.update(val)
+    elif val is not None:
+        out.add(val)
+    return out
+
+
+class _AttachmentQuery:
     def __init__(self, rows):
-        self._rows = list(rows)
+        self._all = list(rows)
+        self._mode = "all"
 
     def filter(self, *args, **kwargs):
+        modes = set()
+        for arg in args:
+            vals = _clause_values(arg)
+            if vals == {"done"} or vals == {"failed"}:
+                modes.add(next(iter(vals)))
+            elif vals >= {"pending", "processing"} or vals == {"pending", "processing"}:
+                modes.add("active")
+            elif vals == {"processing"}:
+                modes.add("processing")
+        if "active" in modes:
+            self._mode = "active"
+        elif "done" in modes:
+            self._mode = "done"
+        elif "failed" in modes:
+            self._mode = "failed"
+        elif "processing" in modes:
+            self._mode = "processing"
         return self
 
+    def _filtered(self):
+        if self._mode == "processing":
+            return [r for r in self._all if r.ocr_status == "processing"]
+        if self._mode == "done":
+            return [r for r in self._all if r.ocr_status == "done"]
+        if self._mode == "failed":
+            return [r for r in self._all if r.ocr_status == "failed"]
+        if self._mode == "active":
+            return [r for r in self._all if r.ocr_status in ("pending", "processing")]
+        return list(self._all)
+
     def all(self):
-        return list(self._rows)
+        return self._filtered()
+
+    def count(self):
+        return len(self._filtered())
 
 
 class _FakeDB:
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self, *, attachments=None, jobs=None):
+        self.attachments = list(attachments or [])
+        self.jobs = {j.id: j for j in (jobs or [])}
         self.committed = False
 
     def query(self, model):
-        return _FakeQuery(self._rows)
+        from app.models import Attachment
+
+        if model is Attachment:
+            return _AttachmentQuery(self.attachments)
+        return _AttachmentQuery([])
+
+    def get(self, model, pk):
+        from app.models import Attachment, ImportJob
+
+        if model is ImportJob:
+            return self.jobs.get(pk)
+        if model is Attachment:
+            for a in self.attachments:
+                if a.id == pk:
+                    return a
+        return None
 
     def commit(self):
         self.committed = True
 
 
-def test_recover_stuck_attachments_resets_processing():
-    a1 = SimpleNamespace(ocr_status="processing")
-    a2 = SimpleNamespace(ocr_status="processing")
-    db = _FakeDB([a1, a2])
+@patch("app.services.import_process.finalize_job")
+def test_recover_stuck_with_partial_done_soft_fails(mock_finalize):
+    job = SimpleNamespace(
+        id=1,
+        status="processing",
+        proposals_json="{}",
+        user_id=1,
+        extract_mode="smart",
+        ocr_raw_text=None,
+    )
+    done = SimpleNamespace(
+        id=10, import_job_id=1, ocr_status="done", filename="a.jpg", ocr_raw_text="ok"
+    )
+    hung = SimpleNamespace(
+        id=11, import_job_id=1, ocr_status="processing", filename="b.jpg", ocr_raw_text=None
+    )
+    db = _FakeDB(attachments=[done, hung], jobs=[job])
     n = recover_stuck_attachments(db)
-    assert n == 2
-    assert a1.ocr_status == "pending"
-    assert a2.ocr_status == "pending"
+    assert n == 1
+    assert hung.ocr_status == "failed"
+    mock_finalize.assert_called_once()
+    assert job_payload(job)["file_errors"]
     assert db.committed is True
 
 
-def test_recover_stuck_noop_when_empty():
-    db = _FakeDB([])
+def test_recover_stuck_without_done_resets_pending():
+    job = SimpleNamespace(
+        id=1, status="processing", proposals_json="{}", user_id=1, extract_mode="smart", ocr_raw_text=None
+    )
+    hung = SimpleNamespace(
+        id=11, import_job_id=1, ocr_status="processing", filename="b.jpg", ocr_raw_text=None
+    )
+    db = _FakeDB(attachments=[hung], jobs=[job])
     n = recover_stuck_attachments(db)
-    assert n == 0
-    assert db.committed is False
+    assert n == 1
+    assert hung.ocr_status == "pending"
+    assert job.status == "processing"
+
+
+def test_record_file_failure_keeps_job_processing():
+    job = SimpleNamespace(id=1, status="processing", proposals_json="{}", user_id=1)
+    att = SimpleNamespace(
+        id=5, import_job_id=1, ocr_status="processing", filename="x.jpg", ocr_raw_text=None
+    )
+    db = _FakeDB(attachments=[att], jobs=[job])
+    record_file_failure(db, att=att, job=job, error="boom")
+    assert att.ocr_status == "failed"
+    assert job.status == "processing"
+    assert "boom" in job_payload(job)["file_errors"][0]["error"]
+
+
+def test_finish_all_failed_marks_job_failed():
+    job = SimpleNamespace(
+        id=1,
+        status="processing",
+        proposals_json='{"file_errors":[{"filename":"a","error":"x"}]}',
+        user_id=1,
+        ocr_raw_text=None,
+    )
+    att = SimpleNamespace(
+        id=5, import_job_id=1, ocr_status="failed", filename="a.jpg", ocr_raw_text="x"
+    )
+    db = _FakeDB(attachments=[att], jobs=[job])
+    assert finish_job_if_idle(db, job) is True
+    assert job.status == "failed"

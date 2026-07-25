@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     max_import_files: int = 40
     # Parallel Smart/classic extracts in the in-process worker
     import_worker_concurrency: int = 2
+    # Max wall time per file before soft-fail and continue the batch (seconds)
+    import_file_timeout_sec: int = 720
     # auto | rapid | tesseract
     ocr_engine: str = "auto"
     # Smart extract (NVIDIA NIM only)
