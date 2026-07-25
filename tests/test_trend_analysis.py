@@ -8,6 +8,7 @@ from app.services.trend_analysis import (
     ANALYSIS_SYSTEM,
     analyze_trends,
     charts_to_analysis_payload,
+    load_user_analyses,
     load_user_analysis,
     render_analysis_html,
     save_user_analysis,
@@ -101,13 +102,48 @@ def test_save_and_load_user_analysis(tmp_path, monkeypatch):
 
     get_settings.cache_clear()
     try:
-        saved = save_user_analysis(42, "## Hello\n\nBody text.")
+        saved = save_user_analysis(42, "## Hello\n\nBody text.", user_focus="ferritin")
         assert saved["text"].startswith("## Hello")
+        assert saved["user_focus"] == "ferritin"
+        assert saved.get("html")
         loaded = load_user_analysis(42)
         assert loaded is not None
         assert loaded["text"] == saved["text"]
+        assert loaded["user_focus"] == "ferritin"
         assert loaded.get("generated_at")
         assert load_user_analysis(99) is None
+
+        save_user_analysis(42, "## Second", user_focus="lipidy")
+        items = load_user_analyses(42)
+        assert len(items) == 2
+        assert items[0]["text"].startswith("## Second")
+        assert items[0]["user_focus"] == "lipidy"
+        assert items[1]["text"].startswith("## Hello")
+    finally:
+        get_settings.cache_clear()
+
+
+def test_legacy_single_analysis_migrates_on_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    from app.config import get_settings
+    from app.services.trend_analysis import _analysis_path
+
+    get_settings.cache_clear()
+    try:
+        path = _analysis_path(7)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            '{"text": "## Old", "generated_at": "2026-01-01 00:00 UTC"}',
+            encoding="utf-8",
+        )
+        items = load_user_analyses(7)
+        assert len(items) == 1
+        assert items[0]["text"] == "## Old"
+        save_user_analysis(7, "## New")
+        items2 = load_user_analyses(7)
+        assert len(items2) == 2
+        assert items2[0]["text"] == "## New"
+        assert items2[1]["text"] == "## Old"
     finally:
         get_settings.cache_clear()
 

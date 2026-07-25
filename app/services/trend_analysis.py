@@ -184,30 +184,82 @@ def _analysis_path(user_id: int) -> Path:
     return base / f"user_{int(user_id)}.json"
 
 
-def save_user_analysis(user_id: int, text: str) -> dict:
-    """Persist analysis on disk (cookie session cannot hold long text)."""
-    payload = {
-        "text": text,
-        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-    }
-    path = _analysis_path(user_id)
-    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    return payload
+HISTORY_MAX = 20
 
 
-def load_user_analysis(user_id: int) -> dict | None:
+def _new_item_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
+
+
+def _normalize_store(raw: object) -> list[dict]:
+    """Accept legacy single-object file or {items:[...]}."""
+    if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+        items = [x for x in raw["items"] if isinstance(x, dict) and (x.get("text") or "").strip()]
+        return items
+    if isinstance(raw, dict) and (raw.get("text") or "").strip():
+        return [
+            {
+                "id": "legacy",
+                "text": str(raw["text"]),
+                "user_focus": raw.get("user_focus") or None,
+                "generated_at": raw.get("generated_at"),
+            }
+        ]
+    return []
+
+
+def _read_items(user_id: int) -> list[dict]:
     path = _analysis_path(user_id)
     if not path.is_file():
-        return None
+        return []
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict) or not (data.get("text") or "").strip():
-        return None
-    text = str(data["text"])
+        return []
+    return _normalize_store(data)
+
+
+def _write_items(user_id: int, items: list[dict]) -> None:
+    path = _analysis_path(user_id)
+    path.write_text(
+        json.dumps({"items": items[:HISTORY_MAX]}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _enrich_item(item: dict) -> dict:
+    text = str(item.get("text") or "")
+    focus = item.get("user_focus")
+    focus_s = str(focus).strip() if focus else None
     return {
+        "id": item.get("id") or _new_item_id(),
         "text": text,
-        "generated_at": data.get("generated_at"),
+        "user_focus": focus_s or None,
+        "generated_at": item.get("generated_at"),
         "html": render_analysis_html(text),
     }
+
+
+def save_user_analysis(user_id: int, text: str, user_focus: str | None = None) -> dict:
+    """Prepend a new analysis (keeps history; newest first)."""
+    focus = (user_focus or "").strip()[:1500] or None
+    item = {
+        "id": _new_item_id(),
+        "text": text,
+        "user_focus": focus,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    items = [item] + _read_items(user_id)
+    _write_items(user_id, items)
+    return _enrich_item(item)
+
+
+def load_user_analyses(user_id: int) -> list[dict]:
+    """Newest-first enriched analyses (html included)."""
+    return [_enrich_item(x) for x in _read_items(user_id)]
+
+
+def load_user_analysis(user_id: int) -> dict | None:
+    """Latest analysis only (compat)."""
+    items = load_user_analyses(user_id)
+    return items[0] if items else None

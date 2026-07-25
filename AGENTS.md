@@ -65,7 +65,7 @@ Upload is **import-first** (`/import`): one batch can create/extend multiple dra
 2. **Odběry** (`/import/{id}/review`) — merge by date, edit/confirm. Back link to Soubory.
 Confirm drops by proposal `uid`. After conditions wizard, return via `import_continue_url`.
 
-**Trends / Výsledky**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Optional user focus prompt; button + consent; text stored under `upload_dir/trend_analysis/` (not cookie session — too large); educational only (**not** a diagnosis).
+**Trends / Výsledky**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Optional user focus prompt; button + consent; analyses stored as history under `upload_dir/trend_analysis/` (newest first; latest prominent, older in `<details>`); educational only (**not** a diagnosis).
 
 Smart extract:
 

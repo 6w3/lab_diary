@@ -15,7 +15,7 @@ from app.services.smart_extract import smart_enabled
 from app.services.trend_analysis import (
     analyze_trends,
     charts_to_analysis_payload,
-    load_user_analysis,
+    load_user_analyses,
     save_user_analysis,
 )
 from app.services.trend_points import collapse_points_per_draw, day_average_points
@@ -186,7 +186,9 @@ def trends(
         view_norm = "charts"
 
     charts, grouped = build_trend_charts(db, user, locale)
-    analysis = load_user_analysis(user.id) if view_norm == "analysis" else None
+    analyses = load_user_analyses(user.id) if view_norm == "analysis" else []
+    analysis = analyses[0] if analyses else None
+    analysis_history = analyses[1:] if len(analyses) > 1 else []
 
     return templates.TemplateResponse(
         request,
@@ -200,6 +202,7 @@ def trends(
             view=view_norm,
             smart_available=smart_enabled(),
             analysis=analysis,
+            analysis_history=analysis_history,
         ),
     )
 
@@ -230,7 +233,7 @@ async def trends_analysis_generate(
     payload = charts_to_analysis_payload(charts)
     try:
         text = analyze_trends(payload, locale=locale, user_focus=focus)
-        save_user_analysis(user.id, text)
+        save_user_analysis(user.id, text, user_focus=focus)
     except Exception as exc:  # noqa: BLE001 — surface to user, keep job usable
         request.session["flash"] = t(locale, "trends_analysis_error", detail=str(exc)[:240])
         return redirect

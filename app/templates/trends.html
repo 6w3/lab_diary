@@ -77,6 +77,38 @@
   }
   .trends-analysis-body li { margin: 0.2rem 0; }
   .trends-analysis-body strong { font-weight: 600; }
+  .trends-analysis-latest {
+    margin: 1rem 0 1.25rem;
+    padding: 0.85rem 0 0.25rem;
+  }
+  .trends-analysis-latest-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.2rem;
+  }
+  .trends-analysis-focus-used {
+    margin: 0 0 0.75rem;
+    font-size: 0.92rem;
+    color: var(--muted);
+  }
+  .trends-analysis-history {
+    margin: 1.75rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .trends-analysis-history-title {
+    margin: 0 0 0.65rem;
+    font-size: 1.05rem;
+  }
+  .trends-analysis-past {
+    margin: 0 0 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .trends-analysis-past summary {
+    cursor: pointer;
+    font-weight: 500;
+  }
+  .trends-analysis-past[open] summary { margin-bottom: 0.5rem; }
   .trends-analysis-form {
     display: grid;
     gap: 0.75rem;
@@ -124,12 +156,20 @@
   <section class="trends-analysis">
     <p class="muted">{{ t('trends_analysis_hint') }}</p>
     <p class="trends-analysis-disclaimer">{{ t('trends_analysis_disclaimer') }}</p>
+
     {% if analysis and analysis.text %}
+    <article class="trends-analysis-latest">
+      <h2 class="trends-analysis-latest-title">{{ t('trends_analysis_latest') }}</h2>
       {% if analysis.generated_at %}
       <p class="muted trends-analysis-meta">{{ t('trends_analysis_generated_at', when=analysis.generated_at) }}</p>
       {% endif %}
+      {% if analysis.user_focus %}
+      <p class="trends-analysis-focus-used"><strong>{{ t('trends_analysis_focus_label') }}</strong> {{ analysis.user_focus }}</p>
+      {% endif %}
       <div class="trends-analysis-body">{{ analysis.html | safe }}</div>
+    </article>
     {% endif %}
+
     {% if smart_available %}
     <form method="post" action="/trends/analysis" class="trends-analysis-form">
       <label class="trends-analysis-focus">{{ t('trends_analysis_focus') }}
@@ -150,6 +190,26 @@
     </form>
     {% else %}
     <p class="error">{{ t('trends_analysis_unavailable') }}</p>
+    {% endif %}
+
+    {% if analysis_history %}
+    <section class="trends-analysis-history" aria-label="{{ t('trends_analysis_older') }}">
+      <h2 class="trends-analysis-history-title">{{ t('trends_analysis_older') }}</h2>
+      {% for a in analysis_history %}
+      <details class="trends-analysis-past">
+        <summary>
+          {{ a.generated_at or '—' }}
+          {% if a.user_focus %}
+          <span class="muted">— {{ a.user_focus }}</span>
+          {% endif %}
+        </summary>
+        {% if a.user_focus %}
+        <p class="trends-analysis-focus-used"><strong>{{ t('trends_analysis_focus_label') }}</strong> {{ a.user_focus }}</p>
+        {% endif %}
+        <div class="trends-analysis-body">{{ a.html | safe }}</div>
+      </details>
+      {% endfor %}
+    </section>
     {% endif %}
   </section>
 {% elif view == 'table' %}
