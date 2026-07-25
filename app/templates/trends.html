@@ -48,6 +48,37 @@
   }
   .trend-table th { color: var(--muted); font-weight: 500; }
   .trend-table .out-of-range { color: #b42318; font-weight: 600; }
+  .trends-analysis { margin: 0.5rem 0 2rem; max-width: 46rem; }
+  .trends-analysis-disclaimer {
+    margin: 0.75rem 0 1rem;
+    padding: 0.65rem 0.75rem;
+    border-left: 3px solid var(--border);
+    font-size: 0.92rem;
+    color: var(--muted);
+  }
+  .trends-analysis-meta { margin: 0 0 0.5rem; font-size: 0.85rem; }
+  .trends-analysis-body {
+    white-space: pre-wrap;
+    line-height: 1.55;
+    margin: 0 0 1.25rem;
+    font-size: 0.98rem;
+  }
+  .trends-analysis-form {
+    display: grid;
+    gap: 0.75rem;
+    justify-items: start;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+  .trends-analysis-consent {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    font-size: 0.92rem;
+    max-width: 36rem;
+  }
+  .trends-analysis-consent input { margin-top: 0.2rem; }
 </style>
 {% endblock %}
 {% block content %}
@@ -57,10 +88,39 @@
 <nav class="trends-tabs" aria-label="{{ t('trends_title') }}">
   <a href="/trends" {% if view == 'charts' %}aria-current="page"{% endif %}>{{ t('trends_tab_charts') }}</a>
   <a href="/trends?view=table" {% if view == 'table' %}aria-current="page"{% endif %}>{{ t('trends_tab_table') }}</a>
+  <a href="/trends?view=analysis" {% if view == 'analysis' %}aria-current="page"{% endif %}>{{ t('trends_tab_analysis') }}</a>
 </nav>
 {% endif %}
 {% if not has_charts %}
   <p>{{ t('trends_empty') }}</p>
+{% elif view == 'analysis' %}
+  <section class="trends-analysis">
+    <p class="muted">{{ t('trends_analysis_hint') }}</p>
+    <p class="trends-analysis-disclaimer">{{ t('trends_analysis_disclaimer') }}</p>
+    {% if analysis and analysis.text %}
+      {% if analysis.generated_at %}
+      <p class="muted trends-analysis-meta">{{ t('trends_analysis_generated_at', when=analysis.generated_at) }}</p>
+      {% endif %}
+      <div class="trends-analysis-body">{{ analysis.text }}</div>
+    {% endif %}
+    {% if smart_available %}
+    <form method="post" action="/trends/analysis" class="trends-analysis-form">
+      <label class="trends-analysis-consent">
+        <input type="checkbox" name="analysis_consent" value="1" required checked>
+        {{ t('trends_analysis_consent') }}
+      </label>
+      <button type="submit" class="btn">
+        {% if analysis and analysis.text %}
+          {{ t('trends_analysis_again') }}
+        {% else %}
+          {{ t('trends_analysis_generate') }}
+        {% endif %}
+      </button>
+    </form>
+    {% else %}
+    <p class="error">{{ t('trends_analysis_unavailable') }}</p>
+    {% endif %}
+  </section>
 {% elif view == 'table' %}
   <p class="muted">{{ t('trends_table_hint') }}</p>
   {% for group in chart_groups %}

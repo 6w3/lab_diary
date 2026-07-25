@@ -65,6 +65,8 @@ Upload is **import-first** (`/import`): one batch can create/extend multiple dra
 2. **Odběry** (`/import/{id}/review`) — merge by date, edit/confirm. Back link to Soubory.
 Confirm drops by proposal `uid`. After conditions wizard, return via `import_continue_url`.
 
+**Trends**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Button + consent; session-cached text; educational only (**not** a diagnosis).
+
 Smart extract:
 
 - Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).

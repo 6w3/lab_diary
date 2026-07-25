@@ -625,6 +625,7 @@ def _nvidia_chat(
     *,
     max_tokens: int = 8192,
     temperature: float = 0.1,
+    system: str | None = None,
 ) -> str:
     settings = get_settings()
     model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
@@ -632,7 +633,7 @@ def _nvidia_chat(
         "model": model,
         # System message keeps reasoning/omni models from dumping chain-of-thought into content.
         "messages": [
-            {"role": "system", "content": JSON_ONLY_SYSTEM},
+            {"role": "system", "content": system if system is not None else JSON_ONLY_SYSTEM},
             {"role": "user", "content": content},
         ],
         "max_tokens": max_tokens,

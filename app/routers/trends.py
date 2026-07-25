@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, Query, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, template_context
-from app.models import BloodDraw, CustomMarker, Marker, ResultValue
+from app.i18n import t
+from app.models import BloodDraw, CustomMarker, Marker, ResultValue, User
 from app.services.markers import MARKER_CATEGORY_LABELS, marker_category, marker_sort_key
+from app.services.smart_extract import smart_enabled
+from app.services.trend_analysis import analyze_trends, charts_to_analysis_payload
 from app.services.trend_points import collapse_points_per_draw, day_average_points
 from app.services.units import format_unit, to_canonical
 
 router = APIRouter(tags=["trends"])
 templates = Jinja2Templates(directory="app/templates")
+
+SESSION_ANALYSIS_KEY = "trend_analysis"
 
 
 def _series_point(result: ResultValue, draw: BloodDraw, marker: Marker | None) -> dict:
@@ -70,18 +76,8 @@ def _series_point(result: ResultValue, draw: BloodDraw, marker: Marker | None) -
     }
 
 
-@router.get("/trends", response_class=HTMLResponse)
-def trends(
-    request: Request,
-    db: DbDep,
-    locale: LocaleDep,
-    user: UserDep,
-    view: str = Query("charts"),
-):
-    view_norm = (view or "charts").strip().lower()
-    if view_norm not in ("charts", "table"):
-        view_norm = "charts"
-
+def build_trend_charts(db, user: User, locale: str) -> tuple[list[dict], list[dict]]:
+    """Build chart series + category groups for trends UI / analysis."""
     rows = (
         db.query(ResultValue, BloodDraw)
         .join(BloodDraw, ResultValue.blood_draw_id == BloodDraw.id)
@@ -165,7 +161,6 @@ def trends(
             }
         )
 
-    # Group for template headings
     grouped: list[dict] = []
     current_cat = None
     for c in charts:
@@ -173,6 +168,23 @@ def trends(
             current_cat = c["category"]
             grouped.append({"category_label": c["category_label"], "charts": []})
         grouped[-1]["charts"].append(c)
+    return charts, grouped
+
+
+@router.get("/trends", response_class=HTMLResponse)
+def trends(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    view: str = Query("charts"),
+):
+    view_norm = (view or "charts").strip().lower()
+    if view_norm not in ("charts", "table", "analysis"):
+        view_norm = "charts"
+
+    charts, grouped = build_trend_charts(db, user, locale)
+    analysis = request.session.get(SESSION_ANALYSIS_KEY) if view_norm == "analysis" else None
 
     return templates.TemplateResponse(
         request,
@@ -184,5 +196,42 @@ def trends(
             charts_json=json.dumps(charts, ensure_ascii=False),
             has_charts=bool(charts),
             view=view_norm,
+            smart_available=smart_enabled(),
+            analysis=analysis if isinstance(analysis, dict) else None,
         ),
     )
+
+
+@router.post("/trends/analysis")
+async def trends_analysis_generate(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    analysis_consent: str | None = Form(None),
+):
+    redirect = RedirectResponse("/trends?view=analysis", status_code=303)
+    if not smart_enabled():
+        request.session["flash"] = t(locale, "trends_analysis_unavailable")
+        return redirect
+    if (analysis_consent or "").strip() != "1":
+        request.session["flash"] = t(locale, "trends_analysis_consent_required")
+        return redirect
+
+    charts, _grouped = build_trend_charts(db, user, locale)
+    if not charts:
+        request.session["flash"] = t(locale, "trends_analysis_empty")
+        return redirect
+
+    payload = charts_to_analysis_payload(charts)
+    try:
+        text = analyze_trends(payload, locale=locale)
+    except Exception as exc:  # noqa: BLE001 — surface to user, keep job usable
+        request.session["flash"] = t(locale, "trends_analysis_error", detail=str(exc)[:240])
+        return redirect
+
+    request.session[SESSION_ANALYSIS_KEY] = {
+        "text": text,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    return redirect
