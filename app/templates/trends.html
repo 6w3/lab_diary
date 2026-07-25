@@ -58,11 +58,25 @@
   }
   .trends-analysis-meta { margin: 0 0 0.5rem; font-size: 0.85rem; }
   .trends-analysis-body {
-    white-space: pre-wrap;
     line-height: 1.55;
     margin: 0 0 1.25rem;
     font-size: 0.98rem;
   }
+  .trends-analysis-body h2 {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 1.15rem;
+  }
+  .trends-analysis-body h3 {
+    margin: 1rem 0 0.4rem;
+    font-size: 1.05rem;
+  }
+  .trends-analysis-body p { margin: 0 0 0.75rem; }
+  .trends-analysis-body ul {
+    margin: 0 0 0.85rem;
+    padding-left: 1.25rem;
+  }
+  .trends-analysis-body li { margin: 0.2rem 0; }
+  .trends-analysis-body strong { font-weight: 600; }
   .trends-analysis-form {
     display: grid;
     gap: 0.75rem;
@@ -70,6 +84,19 @@
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border);
+  }
+  .trends-analysis-focus {
+    display: grid;
+    gap: 0.35rem;
+    width: 100%;
+    max-width: 36rem;
+    font-size: 0.92rem;
+  }
+  .trends-analysis-focus textarea {
+    width: 100%;
+    min-height: 3.2rem;
+    resize: vertical;
+    font: inherit;
   }
   .trends-analysis-consent {
     display: flex;
@@ -101,10 +128,14 @@
       {% if analysis.generated_at %}
       <p class="muted trends-analysis-meta">{{ t('trends_analysis_generated_at', when=analysis.generated_at) }}</p>
       {% endif %}
-      <div class="trends-analysis-body">{{ analysis.text }}</div>
+      <div class="trends-analysis-body">{{ analysis.html | safe }}</div>
     {% endif %}
     {% if smart_available %}
     <form method="post" action="/trends/analysis" class="trends-analysis-form">
+      <label class="trends-analysis-focus">{{ t('trends_analysis_focus') }}
+        <textarea name="user_focus" rows="3" maxlength="1500"
+                  placeholder="{{ t('trends_analysis_focus_placeholder') }}"></textarea>
+      </label>
       <label class="trends-analysis-consent">
         <input type="checkbox" name="analysis_consent" value="1" required checked>
         {{ t('trends_analysis_consent') }}

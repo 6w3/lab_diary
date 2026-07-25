@@ -9,6 +9,7 @@ from app.services.trend_analysis import (
     analyze_trends,
     charts_to_analysis_payload,
     load_user_analysis,
+    render_analysis_html,
     save_user_analysis,
 )
 
@@ -111,9 +112,38 @@ def test_save_and_load_user_analysis(tmp_path, monkeypatch):
         get_settings.cache_clear()
 
 
+def test_analyze_trends_includes_user_focus():
+    payload = [{"marker": "Ferritin", "code": "ferritin", "points": [{"date": "2024-01-01", "value": 20}]}]
+    with patch("app.services.trend_analysis.smart_enabled", return_value=True), patch(
+        "app.services.trend_analysis._nvidia_chat", return_value="ok"
+    ) as chat:
+        analyze_trends(payload, locale="cs", user_focus="zaměř se na ferritin a únavu")
+    prompt = chat.call_args.args[0][0]["text"]
+    assert "User focus" in prompt
+    assert "ferritin a únavu" in prompt
+
+
 def test_analyze_trends_rejects_empty_nvidia():
     with patch("app.services.trend_analysis.smart_enabled", return_value=True), patch(
         "app.services.trend_analysis._nvidia_chat", return_value="   "
     ):
         with pytest.raises(RuntimeError, match="empty"):
             analyze_trends([{"marker": "x", "points": [{"date": "2020-01-01", "value": 1}]}], locale="en")
+
+
+def test_render_analysis_html_headings_lists_bold_and_escapes():
+    md = """## 1. Celkový obraz
+**Stabilní**: hemoglobin.
+- Hemoglobin: 145
+- ALT: <script>x</script>
+### Poznámka
+Další text."""
+    out = render_analysis_html(md)
+    assert "<h2>1. Celkový obraz</h2>" in out
+    assert "<strong>Stabilní</strong>" in out
+    assert "<ul>" in out and "<li>Hemoglobin: 145</li>" in out
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+    assert "<h3>Poznámka</h3>" in out
+    assert "##" not in out
+    assert "**" not in out

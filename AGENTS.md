@@ -24,7 +24,7 @@ When the user gives **durable** process/product instructions (deploy, scope, uni
 - Default extract = **Smart NVIDIA** when `NVIDIA_API_KEY` is set (consent checked by default); Classic fallback.
 - Smart must categorize markers against catalog when possible; unknown → custom marker still OK.
 - Review: edit rows, **add row**, multi-draw dates, prefill **lab_name** from report when detected.
-- Trends: all markers with data + tip/lab refs on one page, grouped/sorted.
+- Trends / **Výsledky** UI: all markers with data + tip/lab refs on one page, grouped/sorted.
 - Smart provider = **NVIDIA NIM only** (no paid Gemini/etc. unless user asks).
 
 ## Units & marker bind
@@ -65,7 +65,7 @@ Upload is **import-first** (`/import`): one batch can create/extend multiple dra
 2. **Odběry** (`/import/{id}/review`) — merge by date, edit/confirm. Back link to Soubory.
 Confirm drops by proposal `uid`. After conditions wizard, return via `import_continue_url`.
 
-**Trends**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Button + consent; text stored under `upload_dir/trend_analysis/` (not cookie session — too large); educational only (**not** a diagnosis).
+**Trends / Výsledky**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Optional user focus prompt; button + consent; text stored under `upload_dir/trend_analysis/` (not cookie session — too large); educational only (**not** a diagnosis).
 
 Smart extract:
 

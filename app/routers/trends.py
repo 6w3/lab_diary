@@ -211,6 +211,7 @@ async def trends_analysis_generate(
     locale: LocaleDep,
     user: UserDep,
     analysis_consent: str | None = Form(None),
+    user_focus: str | None = Form(None),
 ):
     redirect = RedirectResponse("/trends?view=analysis", status_code=303)
     if not smart_enabled():
@@ -225,9 +226,10 @@ async def trends_analysis_generate(
         request.session["flash"] = t(locale, "trends_analysis_empty")
         return redirect
 
+    focus = (user_focus or "").strip()[:1500] or None
     payload = charts_to_analysis_payload(charts)
     try:
-        text = analyze_trends(payload, locale=locale)
+        text = analyze_trends(payload, locale=locale, user_focus=focus)
         save_user_analysis(user.id, text)
     except Exception as exc:  # noqa: BLE001 — surface to user, keep job usable
         request.session["flash"] = t(locale, "trends_analysis_error", detail=str(exc)[:240])
