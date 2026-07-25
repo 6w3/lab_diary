@@ -203,6 +203,17 @@ def test_enrich_overrides_stale_ph_code_hint():
     assert out[0]["marker_code"] == "urine_ph"
 
 
+def test_enrich_drops_stale_code_on_junk_note():
+    from app.services.import_process import enrich_proposals
+
+    catalog = _catalog()
+    out = enrich_proposals(
+        [{"label": "Poznámka k sed.1", "marker_code": "potassium", "value": 0.0, "unit": "pseudov"}],
+        catalog,
+    )
+    assert out[0]["marker_code"] == ""
+
+
 def test_match_note_not_potassium():
     assert match_marker("Poznámka k sed.1", _catalog()) is None
 

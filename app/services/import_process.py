@@ -65,7 +65,12 @@ def enrich_proposals(
     user_aliases: dict[str, str] | None = None,
     allow_fuzzy: bool = True,
 ) -> list[dict]:
-    from app.services.markers import match_marker_alias, resolve_marker
+    from app.services.markers import (
+        extract_lis_code_hint,
+        match_marker,
+        match_marker_alias,
+        resolve_marker,
+    )
 
     out: list[dict] = []
     for p in proposals:
@@ -76,10 +81,15 @@ def enrich_proposals(
         if strong:
             matched = strong
         else:
+            fuzzy = match_marker(source_label, catalog) if (allow_fuzzy and source_label) else None
+            lis = extract_lis_code_hint(source_label) if source_label else None
+            # Junk/unknown labels: do not keep stale marker_code (e.g. note→potassium).
+            # Trust code_hint only when label itself maps somewhere or has LIS tag.
+            hint = code if (fuzzy or lis or not source_label) else None
             matched = resolve_marker(
                 source_label,
                 catalog,
-                code_hint=code,
+                code_hint=hint,
                 user_aliases=user_aliases,
                 allow_fuzzy=allow_fuzzy,
             )

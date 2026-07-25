@@ -23,6 +23,19 @@ def test_junk_footer_metadata():
     assert is_junk_label("Sestaveno a vydáno")
 
 
+def test_junk_sediment_note():
+    assert is_junk_label("Poznámka k sed.1")
+    assert is_junk_label("Poznámka k sedimentu")
+    out = filter_proposals(
+        [
+            {"label": "Poznámka k sed.1", "value": 0.0, "unit": "pseudov", "marker_code": "potassium"},
+            {"label": "Draslík", "value": 4.2, "unit": "mmol/l", "marker_code": "potassium"},
+        ]
+    )
+    assert len(out) == 1
+    assert out[0]["label"] == "Draslík"
+
+
 def test_keeps_real_analytes():
     assert not is_junk_label("ALP")
     assert not is_junk_label("S_Triacylglyceroly")

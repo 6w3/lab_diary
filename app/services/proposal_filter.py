@@ -76,6 +76,7 @@ _JUNK_PHRASE_SUBSTR: tuple[str, ...] = (
     "nazev vysetreni",
     "hodnoceni stadia",
     "poznamka lekare",
+    "poznamka k sed",
     "metoda v rozsahu",
     "elektronickou peceti",
     "klasifikace dokum",
@@ -136,6 +137,8 @@ def is_junk_label(label: str) -> bool:
     if folded.startswith("cp ") or folded.startswith("cp:"):
         return True
     if folded.startswith("platce"):
+        return True
+    if folded.startswith("poznamka"):
         return True
     if folded.startswith("ico") or folded.startswith("icp"):
         return True
