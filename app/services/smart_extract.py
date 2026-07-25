@@ -69,9 +69,10 @@ Return ONLY valid JSON (no markdown):
 Task: find draw/sample dates on this Czech lab report or EHR screenshot.
 
 layout:
-- "multi_column" ONLY if there is a historical comparison TABLE with several DATE COLUMNS as headers (each column = another draw).
+- "multi_column" if there is a historical comparison TABLE with several DATE COLUMNS as headers (each column = another draw).
   Typical: Czech hospital HTO/biochem printouts (e.g. Příbram OpenLIMS) with dates like "14. 10. 2020 12:15" and "18. 5. 2016 12:45" ABOVE value columns, one marker list, multiple value columns.
-- "single" if this is one visit / one result list (PC DOKTOR, single panel, one "Datum odběru").
+  If you can see TWO OR MORE date headers above value columns, layout MUST be "multi_column" (never "single").
+- "single" if this is one visit / one result list (PC DOKTOR, single panel, one "Datum odběru") with NO historical date columns.
 - "unknown" if unclear.
 
 dates:
@@ -265,6 +266,24 @@ def looks_like_hallucinated_extract(proposals: list[dict]) -> bool:
     return False
 
 
+def _looks_like_history_columns(dates: list[str]) -> bool:
+    """True when dates look like multi-year comparison columns, not one draw."""
+    parsed: list[date] = []
+    for raw in dates:
+        try:
+            parsed.append(date.fromisoformat(str(raw)[:10]))
+        except ValueError:
+            continue
+    parsed = sorted(set(parsed))
+    if len(parsed) < 2:
+        return False
+    iso = [d.isoformat() for d in parsed]
+    if _is_consecutive_day_run(iso):
+        return False
+    span_days = (parsed[-1] - parsed[0]).days
+    return span_days >= 60 or len(parsed) >= 3
+
+
 def _sanitize_discovered_dates(
     dates: list[str],
     *,
@@ -277,6 +296,9 @@ def _sanitize_discovered_dates(
         if iso and iso not in clean:
             clean.append(iso)
     if layout == "single":
+        # VLM often lists all column dates but mislabels layout as single.
+        if _looks_like_history_columns(clean):
+            return clean
         return clean[:1]
     if layout != "multi_column":
         # Unknown layout: never force a consecutive day run into extraction
@@ -375,7 +397,16 @@ def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
     layout = str(data.get("layout") or "unknown").strip().lower()
     if layout not in {"single", "multi_column", "unknown"}:
         layout = "unknown"
-    dates = _sanitize_discovered_dates(list(data.get("dates") or []), layout=layout)
+    raw_dates = list(data.get("dates") or [])
+    tentative: list[str] = []
+    for raw in raw_dates:
+        iso = _normalize_drawn_on(str(raw))
+        if iso and iso not in tentative:
+            tentative.append(iso)
+    # Model often returns every column date but still says layout=single.
+    if layout in {"single", "unknown"} and _looks_like_history_columns(tentative):
+        layout = "multi_column"
+    dates = _sanitize_discovered_dates(raw_dates, layout=layout)
     return layout, dates
 
 
@@ -395,7 +426,14 @@ def _build_extract_content(
     force_single: bool = False,
 ) -> list[dict]:
     content: list[dict] = [{"type": "text", "text": SMART_SCHEMA_HINT}]
-    if force_single or layout == "single":
+    effective_layout = layout
+    if (
+        not force_single
+        and effective_layout != "multi_column"
+        and _looks_like_history_columns(discovered)
+    ):
+        effective_layout = "multi_column"
+    if force_single or effective_layout == "single":
         content.append({"type": "text", "text": SINGLE_DRAW_HINT})
         if discovered:
             content.append(
@@ -404,7 +442,7 @@ def _build_extract_content(
                     "text": f"Preferred sample date (Datum odběru) if visible: {discovered[0]}.",
                 }
             )
-    elif layout == "multi_column" and discovered:
+    elif effective_layout == "multi_column" and discovered:
         content.append(
             {
                 "type": "text",

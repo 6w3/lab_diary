@@ -82,17 +82,7 @@ def _build_groups(
 
 
 @router.get("", response_class=HTMLResponse)
-def import_form(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
-    open_jobs = (
-        db.query(ImportJob)
-        .filter(
-            ImportJob.user_id == user.id,
-            ImportJob.status.in_(("processing", "review")),
-        )
-        .order_by(ImportJob.id.desc())
-        .limit(10)
-        .all()
-    )
+def import_form(request: Request, locale: LocaleDep, user: UserDep):
     return templates.TemplateResponse(
         request,
         "import/upload.html",
@@ -102,7 +92,6 @@ def import_form(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
             smart_available=smart_enabled(),
             default_smart=smart_enabled(),
             max_import_files=get_settings().max_import_files,
-            open_jobs=open_jobs,
         ),
     )
 

@@ -4,6 +4,7 @@ from app.services.multi_date import unique_drawn_dates
 from app.services.smart_extract import (
     _extract_json,
     _is_consecutive_day_run,
+    _looks_like_history_columns,
     _message_text,
     _sanitize_discovered_dates,
     looks_like_hallucinated_extract,
@@ -34,6 +35,20 @@ def test_sanitize_drops_day_spam_for_unknown():
     assert _sanitize_discovered_dates(dates, layout="unknown") == []
     assert _sanitize_discovered_dates(dates, layout="single") == ["2024-06-07"]
     assert _sanitize_discovered_dates(dates, layout="multi_column") == []
+
+
+def test_history_columns_promoted_from_mislabeled_single():
+    dates = ["2020-10-14", "2016-05-18", "2010-09-14"]
+    assert _looks_like_history_columns(dates)
+    # Keep all three even when VLM said layout=single
+    assert _sanitize_discovered_dates(dates, layout="single") == dates
+
+
+def test_two_close_dates_still_single():
+    # Same-week revisit is not a history table
+    dates = ["2024-06-07", "2024-06-14"]
+    assert not _looks_like_history_columns(dates)
+    assert _sanitize_discovered_dates(dates, layout="single") == ["2024-06-07"]
 
 
 def test_hallucinated_ferritin_spam():
