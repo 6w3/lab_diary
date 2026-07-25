@@ -162,6 +162,57 @@ def test_match_ca19_9():
     assert m.code == "ca19_9"
 
 
+def test_match_ca72_4_not_calcium():
+    m = match_marker("Ca 72-4", _catalog())
+    assert m is not None
+    assert m.code == "ca72_4"
+
+
+def test_match_thyroglobulin_not_triglycerides():
+    m = match_marker("Tg (tyreoglobulin)", _catalog())
+    assert m is not None
+    assert m.code == "thyroglobulin"
+
+
+def test_match_bare_tg_still_triglycerides():
+    m = match_marker("TG", _catalog())
+    assert m is not None
+    assert m.code == "triglycerides"
+
+
+def test_match_scc():
+    m = match_marker("SCC", _catalog())
+    assert m is not None
+    assert m.code == "scc"
+
+
+def test_match_urine_ph_not_eosinophils():
+    m = match_marker("pH", _catalog())
+    assert m is not None
+    assert m.code == "urine_ph"
+
+
+def test_match_note_not_potassium():
+    assert match_marker("Poznámka k sed.1", _catalog()) is None
+
+
+def test_match_tromb_hematokrit_pct():
+    m = match_marker("Tromb. hematokrit", _catalog())
+    assert m is not None
+    assert m.code == "pct"
+
+
+def test_match_vma_and_hiiaa():
+    assert match_marker("Kys.vanilmadlová", _catalog()).code == "vma"
+    assert match_marker("5-HIO", _catalog()).code == "hiiaa"
+
+
+def test_match_egfr_mdrd_alias():
+    m = match_marker("Vypočet GF MDRD kre.", _catalog())
+    assert m is not None
+    assert m.code == "egfr"
+
+
 def test_seed_codes_unique():
     codes = [m["code"] for m in MARKER_SEED]
     assert len(codes) == len(set(codes))

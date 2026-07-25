@@ -157,6 +157,16 @@ def test_record_file_failure_keeps_job_processing():
     assert err["filename"].startswith("1/1")
 
 
+def test_ensure_proposal_uids_and_prepare():
+    from app.services.import_process import ensure_proposal_uids
+
+    payload = {"proposals": [{"label": "HGB", "value": 1}, {"label": "RBC", "value": 2, "uid": "keep"}]}
+    assert ensure_proposal_uids(payload) is True
+    assert payload["proposals"][0]["uid"]
+    assert payload["proposals"][1]["uid"] == "keep"
+    assert ensure_proposal_uids(payload) is False
+
+
 def test_attachment_display_name_prefers_original():
     att = SimpleNamespace(filename="deadbeef.jpg", original_filename="moje_foto.HEIC")
     assert attachment_display_name(att) == "moje_foto.HEIC"

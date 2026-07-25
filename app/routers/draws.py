@@ -8,7 +8,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
+from app.deps import DbDep, LocaleDep, UserDep, read_form, redirect, template_context
 from app.i18n import t
 from app.models import Attachment, BloodDraw, DrawConditions, ImportJob, Marker, ResultValue, User
 from app.services.draw_organize import (
@@ -150,7 +150,7 @@ def new_draw_form(request: Request, locale: LocaleDep, user: UserDep):
 
 @router.post("/new")
 async def create_draw(request: Request, db: DbDep, user: UserDep):
-    form = dict(await request.form())
+    form = dict(await read_form(request))
     drawn_at = _parse_drawn_at(form["drawn_at"])
     lab_name = (form.get("lab_name") or "").strip()
     if not lab_name:
@@ -230,7 +230,7 @@ async def edit_draw(request: Request, db: DbDep, user: UserDep, draw_id: int):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    form = dict(await request.form())
+    form = dict(await read_form(request))
     draw.drawn_at = _parse_drawn_at(form["drawn_at"])
     draw.lab_name = (form.get("lab_name") or "").strip()
     draw.workplace = (form.get("workplace") or "").strip() or None
@@ -267,7 +267,7 @@ async def split_results(request: Request, db: DbDep, user: UserDep, draw_id: int
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    form = await request.form()
+    form = await read_form(request)
     selected = set(form.getlist("result_ids"))
     if not selected:
         request.session["flash"] = "Vyber výsledky k oddělení."
@@ -306,7 +306,7 @@ async def move_results(request: Request, db: DbDep, user: UserDep, draw_id: int)
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    form = await request.form()
+    form = await read_form(request)
     selected = []
     for raw_id in form.getlist("result_ids"):
         try:
@@ -337,7 +337,7 @@ async def merge_draw(request: Request, db: DbDep, user: UserDep, draw_id: int):
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    form = await request.form()
+    form = await read_form(request)
     try:
         target_id = int(form.get("target_draw_id") or 0)
     except (TypeError, ValueError):
@@ -476,7 +476,7 @@ async def ocr_confirm(request: Request, db: DbDep, user: UserDep, draw_id: int, 
     draw = _get_owned_draw(db, user.id, draw_id)
     if not draw:
         return redirect("/draws")
-    form = await request.form()
+    form = await read_form(request)
     selected = set(form.getlist("selected"))
     count = int(form.get("count") or 0)
     pending = [r for r in draw.results if not r.confirmed and r.attachment_id == attachment_id]

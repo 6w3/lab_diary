@@ -149,6 +149,17 @@ MARKER_SEED: list[dict] = [
     {"code": "ca125", "name_cs": "CA 125", "name_en": "CA 125", "default_unit": "kU/l", "tip_ref_low": None, "tip_ref_high": 35},
     {"code": "ca19_9", "name_cs": "CA 19-9", "name_en": "CA 19-9", "default_unit": "kU/l", "tip_ref_low": None, "tip_ref_high": 37},
     {"code": "ca15_3", "name_cs": "CA 15-3", "name_en": "CA 15-3", "default_unit": "kU/l", "tip_ref_low": None, "tip_ref_high": 30},
+    {"code": "ca72_4", "name_cs": "CA 72-4", "name_en": "CA 72-4", "default_unit": "kU/l", "tip_ref_low": None, "tip_ref_high": 6.9},
+    {"code": "scc", "name_cs": "SCC", "name_en": "SCC antigen", "default_unit": "ug/l", "tip_ref_low": None, "tip_ref_high": 1.5},
+    {"code": "thyroglobulin", "name_cs": "Tyreoglobulin (Tg)", "name_en": "Thyroglobulin", "default_unit": "ug/l", "tip_ref_low": None, "tip_ref_high": 55},
+    {"code": "pct", "name_cs": "PCT (trombocytární hematokrit)", "name_en": "Plateletcrit (PCT)", "default_unit": "%", "tip_ref_low": 0.1, "tip_ref_high": 0.5},
+    {"code": "hiiaa", "name_cs": "5-HIAA", "name_en": "5-HIAA", "default_unit": "mg/24h", "tip_ref_low": None, "tip_ref_high": 8},
+    {"code": "vma", "name_cs": "Kyselina vanilmandlová (VMA)", "name_en": "VMA", "default_unit": "mg/24h", "tip_ref_low": None, "tip_ref_high": 6.5},
+    {"code": "bence_jones", "name_cs": "Bence-Jonesova bílkovina", "name_en": "Bence-Jones protein", "default_unit": "mg/24h", "tip_ref_low": None, "tip_ref_high": None},
+    {"code": "urobilinogen", "name_cs": "Urobilinogen", "name_en": "Urobilinogen", "default_unit": "umol/l", "tip_ref_low": None, "tip_ref_high": 17},
+    {"code": "urine_ketones", "name_cs": "Ketony (aceton) v moči", "name_en": "Urine ketones", "default_unit": "mmol/l", "tip_ref_low": None, "tip_ref_high": 0},
+    {"code": "urine_blood", "name_cs": "Krev v moči", "name_en": "Urine blood", "default_unit": "1", "tip_ref_low": None, "tip_ref_high": 0},
+    {"code": "urine_ph", "name_cs": "pH moči", "name_en": "Urine pH", "default_unit": "1", "tip_ref_low": 5.0, "tip_ref_high": 8.0},
 ]
 
 # Display order for trends / multi-chart pages (category → marker codes).
@@ -156,7 +167,7 @@ MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
     (
         "hematology",
         [
-            "hgb", "hct", "rbc", "mcv", "mch", "mchc", "rdw", "wbc", "plt", "mpv", "pdw",
+            "hgb", "hct", "rbc", "mcv", "mch", "mchc", "rdw", "wbc", "plt", "mpv", "pdw", "pct",
             "nrbc", "nrbc_abs",
             "neutrophils", "neutrophils_abs",
             "lymphocytes", "lymphocytes_abs",
@@ -170,7 +181,7 @@ MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
     ),
     ("iron", ["ferritin", "iron", "transferrin", "tibc", "uibc", "transferrin_sat", "stfr"]),
     ("vitamins", ["vitamin_d", "b12", "folate", "zinc", "copper", "selenium"]),
-    ("thyroid", ["tsh", "ft4", "ft3", "tt4", "tt3", "anti_tg", "anti_tpo", "anti_tshr"]),
+    ("thyroid", ["tsh", "ft4", "ft3", "tt4", "tt3", "thyroglobulin", "anti_tg", "anti_tpo", "anti_tshr"]),
     (
         "hormones",
         [
@@ -179,7 +190,7 @@ MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
         ],
     ),
     ("bone", ["ctx", "osteocalcin", "p1np", "pth"]),
-    ("tumor", ["psa", "fpsa", "fpsa_psa", "cea", "afp", "ca125", "ca19_9", "ca15_3"]),
+    ("tumor", ["psa", "fpsa", "fpsa_psa", "cea", "afp", "ca125", "ca19_9", "ca15_3", "ca72_4", "scc"]),
     ("glucose", ["glucose", "hba1c", "insulin", "c_peptide", "lactate"]),
     ("lipids", ["apob", "apoa1", "cholesterol", "ldl", "hdl", "non_hdl", "triglycerides", "lpa"]),
     ("inflammation", ["crp", "hs_crp", "homocysteine", "albumin", "total_protein", "rf", "aslo"]),
@@ -188,6 +199,13 @@ MARKER_CATEGORY_ORDER: list[tuple[str, list[str]]] = [
     ("cardiac", ["troponin_i", "nt_pro_bnp", "myoglobin"]),
     ("coagulation", ["inr", "aptt", "fibrinogen", "d_dimer"]),
     ("kidney", ["creatinine", "urea", "uric_acid", "egfr", "cystatin_c"]),
+    (
+        "urine",
+        [
+            "urine_ph", "urobilinogen", "urine_ketones", "urine_blood",
+            "hiiaa", "vma", "bence_jones",
+        ],
+    ),
     ("electrolytes", ["sodium", "potassium", "chloride", "calcium", "magnesium", "phosphorus", "osmolality"]),
 ]
 
@@ -207,6 +225,7 @@ MARKER_CATEGORY_LABELS = {
     "cardiac": {"cs": "Kardiální markery", "en": "Cardiac markers"},
     "coagulation": {"cs": "Koagulace", "en": "Coagulation"},
     "kidney": {"cs": "Ledviny", "en": "Kidney"},
+    "urine": {"cs": "Moč / metabolity", "en": "Urine / metabolites"},
     "electrolytes": {"cs": "Elektrolyty", "en": "Electrolytes"},
     "other": {"cs": "Ostatní", "en": "Other"},
     "custom": {"cs": "Vlastní", "en": "Custom"},
@@ -264,6 +283,13 @@ MARKER_ALIASES: dict[str, str] = {
     "egfr": "egfr",
     "ckd-epi": "egfr",
     "ckd epi": "egfr",
+    "odhad dle ckd-epi": "egfr",
+    "odhad dle ckd epi": "egfr",
+    "vypocet gf mdrd": "egfr",
+    "vypocet gf mdrd kre": "egfr",
+    "vypocet gf mdrd kre.": "egfr",
+    "gf mdrd": "egfr",
+    "mdrd": "egfr",
     "ast": "ast",
     "alt": "alt",
     "ggt": "ggt",
@@ -291,6 +317,12 @@ MARKER_ALIASES: dict[str, str] = {
     "triglyceridy": "triglycerides",
     "triacylglyceroly": "triglycerides",
     "triacylglycerides": "triglycerides",
+    # Thyroglobulin must beat bare "tg" via longer phrase / name token
+    "tyreoglobulin": "thyroglobulin",
+    "thyroglobulin": "thyroglobulin",
+    "tg tyreoglobulin": "thyroglobulin",
+    "tg (tyreoglobulin)": "thyroglobulin",
+    "tg thyroglobulin": "thyroglobulin",
     "feritin": "ferritin",
     "ferritin": "ferritin",
     "hemoglobin": "hgb",
@@ -298,6 +330,12 @@ MARKER_ALIASES: dict[str, str] = {
     "hgb": "hgb",
     "hematokrit": "hct",
     "hct": "hct",
+    "pct": "pct",
+    "plateletcrit": "pct",
+    "tromb hematokrit": "pct",
+    "tromb. hematokrit": "pct",
+    "trombocytarni hematokrit": "pct",
+    "trombocytární hematokrit": "pct",
     "erytrocyty": "rbc",
     "erythrocytes": "rbc",
     "rbc": "rbc",
@@ -530,6 +568,39 @@ MARKER_ALIASES: dict[str, str] = {
     "ca 15-3": "ca15_3",
     "ca15-3": "ca15_3",
     "ca15_3": "ca15_3",
+    "ca 72-4": "ca72_4",
+    "ca 72.4": "ca72_4",
+    "ca72-4": "ca72_4",
+    "ca72.4": "ca72_4",
+    "ca72_4": "ca72_4",
+    "scc": "scc",
+    "scc ag": "scc",
+    "5-hio": "hiiaa",
+    "5-hiaa": "hiiaa",
+    "5 hiaa": "hiiaa",
+    "5hiaa": "hiiaa",
+    "hiaa": "hiiaa",
+    "kys vanilmadlova": "vma",
+    "kys.vanilmadlova": "vma",
+    "kyselina vanilmandlova": "vma",
+    "kyselina vanilmandlová": "vma",
+    "vanilmandlova": "vma",
+    "vma": "vma",
+    "bence-jones": "bence_jones",
+    "bence jones": "bence_jones",
+    "bencejones": "bence_jones",
+    "urobilinogen": "urobilinogen",
+    "aceton": "urine_ketones",
+    "ketony": "urine_ketones",
+    "ketony v moci": "urine_ketones",
+    "ketony v moči": "urine_ketones",
+    "krev v moci": "urine_blood",
+    "krev v moči": "urine_blood",
+    "occult blood": "urine_blood",
+    "ph": "urine_ph",
+    "ph moci": "urine_ph",
+    "ph moči": "urine_ph",
+    "urine ph": "urine_ph",
 }
 
 # Lab LIS prefixes / method tokens commonly prepended to analyte names.
@@ -631,8 +702,12 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
                 if hit:
                     return hit
 
-    # 3) Trailing lab abbreviation (e.g. "Barvivo erytr. MCH" → MCH)
+    # 3) Trailing lab abbreviation (e.g. "Barvivo erytr. MCH" → MCH).
+    # Skip ultra-short tokens in multi-token labels ("k" in notes, "ca" in "Ca 72-4"
+    # without a longer alias hit) — single-token "K"/"Ca"/"Na" still match.
     for tok in reversed(tokens):
+        if len(tok) <= 2 and len(tokens) > 1:
+            continue
         hit = _from_alias(aliases_folded.get(tok))
         if hit:
             return hit
@@ -663,7 +738,7 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
                 if prefer_abs and m.code.endswith("_abs"):
                     score += 50
                 candidates.append((score, m))
-            elif len(name) >= 3 and (name in folded or folded in name):
+            elif len(name) >= 3 and len(folded) >= 3 and (name in folded or folded in name):
                 score = 100 + len(name)
                 if re.search(rf"(^|[^a-z0-9]){re.escape(name)}([^a-z0-9]|$)", folded):
                     score += 200

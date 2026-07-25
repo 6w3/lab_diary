@@ -6,7 +6,8 @@
          data-status="{{ progress.status }}"
          data-review-url="/import/{{ job.id }}/review"
          data-retry-label="{{ t('import_retry_file') }}"
-         data-retry-all-label="{{ t('import_retry_all_failed') }}">
+         data-retry-all-label="{{ t('import_retry_all_failed') }}"
+         data-review-ready-label="{{ t('import_review_ready') }}">
   <h1>{{ t('import_progress_title') }}</h1>
   <div class="spinner" aria-hidden="true"></div>
   <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
@@ -16,6 +17,14 @@
     <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
   </div>
   <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
+
+  <p id="progress-review-cta" class="progress-review-cta"
+     {% if not progress.review_ready or progress.status == 'review' %}hidden{% endif %}>
+    <a class="btn" id="progress-review-link" href="/import/{{ job.id }}/review">
+      {{ t('import_review_ready', count=progress.proposal_count or 0) }}
+    </a>
+    <span class="muted">{{ t('import_review_while_running_hint') }}</span>
+  </p>
 
   <div class="file-status-grid" id="progress-file-status">
     <div class="file-status-block" id="progress-done-box" {% if not progress.file_done %}hidden{% endif %}>
@@ -46,7 +55,8 @@
 
   <div class="card error-box" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
-    <p class="muted" id="progress-retry-hint">{{ t('import_retry_while_running_hint') }}</p>
+    <p class="muted" id="progress-retry-hint"
+       {% if (progress.file_errors or [])|length < 2 %}hidden{% endif %}>{{ t('import_retry_while_running_hint') }}</p>
     <ul class="file-error-list" id="progress-file-error-list">
       {% for e in progress.file_errors or [] %}
         <li>
@@ -77,6 +87,7 @@
   if (!root) return;
   const jobId = root.dataset.jobId;
   const retryLabel = root.dataset.retryLabel || "Retry";
+  const reviewReadyTpl = root.dataset.reviewReadyLabel || "Review ready ({count})";
   const statusEl = document.getElementById("progress-status");
   const fillEl = document.getElementById("progress-fill");
   const countEl = document.getElementById("progress-count");
@@ -84,7 +95,10 @@
   const fileErrBox = document.getElementById("progress-file-errors");
   const fileErrList = document.getElementById("progress-file-error-list");
   const retryAllForm = document.getElementById("progress-retry-all");
+  const retryHint = document.getElementById("progress-retry-hint");
   const actionsEl = document.getElementById("progress-actions");
+  const reviewCta = document.getElementById("progress-review-cta");
+  const reviewLink = document.getElementById("progress-review-link");
   const bar = root.querySelector(".progress-bar");
   const doneBox = document.getElementById("progress-done-box");
   const doneList = document.getElementById("progress-done-list");
@@ -122,6 +136,7 @@
       fileErrBox.hidden = true;
       fileErrList.innerHTML = "";
       if (retryAllForm) retryAllForm.hidden = true;
+      if (retryHint) retryHint.hidden = true;
       return;
     }
     fileErrBox.hidden = false;
@@ -139,7 +154,25 @@
       }
       return "<li><span><strong>" + name + "</strong>: " + err + "</span>" + btn + "</li>";
     }).join("");
-    if (retryAllForm) retryAllForm.hidden = list.length < 2;
+    const multi = list.length >= 2;
+    if (retryAllForm) retryAllForm.hidden = !multi;
+    if (retryHint) retryHint.hidden = !multi;
+  }
+
+  function renderReviewCta(data) {
+    if (!reviewCta || !reviewLink) return;
+    // Full batch done → auto-redirect; mid-flight → show CTA.
+    if (data.status === "review") {
+      reviewCta.hidden = true;
+      return;
+    }
+    if (data.review_ready && data.review_url) {
+      reviewCta.hidden = false;
+      reviewLink.href = data.review_url;
+      reviewLink.textContent = reviewReadyTpl.replace("{count}", String(data.proposal_count || 0));
+    } else {
+      reviewCta.hidden = true;
+    }
   }
 
   function apply(data) {
@@ -151,6 +184,7 @@
     renderNameList(runningBox, runningList, data.file_running);
     renderNameList(queuedBox, queuedList, data.file_queued);
     renderFileErrors(data.file_errors);
+    renderReviewCta(data);
     if (data.status === "review" && data.review_url) {
       stopped = true;
       window.location.href = data.review_url;

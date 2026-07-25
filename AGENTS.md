@@ -59,6 +59,8 @@ Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). 
 
 Upload is **import-first** (`/import`): one batch can create/extend multiple draws. Never silent-merge by day+lab — review asks merge vs new draw. Files link via `draw_attachments` M2M. Dedup identical results on confirm. Conditions wizard after confirm (create new / edit existing). Split selected results on draw detail if merged by mistake.
 
+**Progressive confirm**: while a batch is still `processing`, progress page shows done / running / queued / failed (retry). As soon as some files have proposals, user can open review and confirm those rows; remaining files keep extracting. Confirm drops by proposal `uid` so worker appends stay safe. After conditions wizard, return to progress (or remaining review) via `import_continue_url`.
+
 Smart extract:
 
 - Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).
@@ -68,5 +70,5 @@ Smart extract:
 
 ## Marker catalog
 
-Extend `MARKER_SEED` + `MARKER_ALIASES` for standard Czech lab abbreviations (e.g. `Barvivo erytr. MCH` → `mch`).
+Extend `MARKER_SEED` + `MARKER_ALIASES` for standard Czech lab abbreviations (e.g. `Barvivo erytr. MCH` → `mch`). Also cover tumor extras (`ca72_4`, `scc`), thyroglobulin (not bare `tg`), PCT, urine dipstick / 24h metabolites (`urine_ph`, `urobilinogen`, `hiiaa`, `vma`, `bence_jones`). Never let short tokens (`k`, `ca`, `ph`) fuzzy-steal multi-word labels.
 **Smart AI is the primary marker mapper** (Czech labels → catalog `marker_code`). Backend trusts a valid Smart code; LIS brackets + fuzzy fill gaps (see Units & marker bind).

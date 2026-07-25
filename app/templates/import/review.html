@@ -2,6 +2,13 @@
 {% block title %}{{ t('ocr_review') }}{% endblock %}
 {% block content %}
 <h1>{{ t('ocr_review') }}</h1>
+{% if still_running %}
+  <div class="card review-running-banner">
+    <p><strong>{{ t('import_review_partial_title') }}</strong></p>
+    <p class="muted">{{ t('import_review_partial_hint') }}</p>
+    <p><a class="btn secondary" href="{{ progress_url }}">{{ t('import_back_to_progress') }}</a></p>
+  </div>
+{% endif %}
 {% if file_errors %}
   <div class="card error-box">
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
@@ -97,6 +104,7 @@
         <tr>
           <td><input type="checkbox" name="selected" value="{{ ns.idx }}" checked></td>
           <td>
+            <input type="hidden" name="uid_{{ ns.idx }}" value="{{ r.uid or '' }}">
             <input type="hidden" name="attachment_id_{{ ns.idx }}" value="{{ r.attachment_id or '' }}">
             <input type="hidden" name="group_idx_{{ ns.idx }}" value="{{ g.idx }}">
             <input type="text" name="label_{{ ns.idx }}" value="{{ r.label }}" placeholder="{{ t('source_label') }}">
@@ -141,11 +149,13 @@
     <button type="submit">{{ t('confirm_results') }}</button>
   </p>
 </form>
+{% if not still_running %}
 <form method="post" action="/import/{{ job.id }}/discard" class="danger-zone"
       data-confirm="{{ t('discard_document_confirm') }}"
       onsubmit="return confirm(this.getAttribute('data-confirm'))">
   <button type="submit" class="danger">{{ t('discard_document') }}</button>
 </form>
+{% endif %}
 <details>
   <summary>OCR raw</summary>
   <pre>{{ job.ocr_raw_text }}</pre>
@@ -154,6 +164,7 @@
   <tr>
     <td><input type="checkbox" name="selected" value="__IDX__" checked></td>
     <td>
+      <input type="hidden" name="uid___IDX__" value="">
       <input type="hidden" name="attachment_id___IDX__" value="">
       <input type="hidden" name="group_idx___IDX__" value="{{ groups[-1].idx if groups else 0 }}">
       <input type="text" name="label___IDX__" value="" placeholder="{{ t('source_label') }}">

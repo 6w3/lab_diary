@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
-from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
+from app.deps import DbDep, LocaleDep, UserDep, read_form, redirect, template_context
 from app.models import Attachment, BloodDraw, ImportJob, Marker, ResultValue
 from app.services.draw_organize import (
     apply_draw_conditions,
@@ -22,7 +22,11 @@ from app.services.draw_organize import (
 from app.services.import_process import (
     attachment_display_name,
     claim_attachment_for_job,
+    ensure_proposal_uids,
+    job_has_active_attachments,
+    job_payload,
     maybe_finalize_idle_jobs,
+    prepare_review_proposals,
     process_claimed_attachment,
     retry_failed_attachments,
     save_job_payload,
@@ -175,6 +179,7 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         payload = {}
     file_errors = list(payload.get("file_errors") or [])
     # Prefer live labels from attachments (original upload names + batch position).
+    # Never keep stale payload errors once nothing is failed anymore.
     if failed_atts:
         by_id = {e.get("attachment_id"): e for e in file_errors if e.get("attachment_id")}
         rebuilt = []
@@ -189,6 +194,8 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
                 }
             )
         file_errors = rebuilt
+    else:
+        file_errors = []
 
     if job.status == "review":
         message = i18n_t(locale, "import_progress_done")
@@ -237,6 +244,11 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
     elif file_errors and job.status == "review":
         error = None
 
+    proposal_count = len(payload.get("proposals") or [])
+    # Mid-flight review: confirm already-extracted rows while other files still run.
+    review_ready = proposal_count > 0 and job.status in {"processing", "review"}
+    review_url = f"/import/{job.id}/review" if review_ready else None
+
     return {
         "status": job.status,
         "done": done,
@@ -248,7 +260,9 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         "percent": int(round(100 * done / total)) if total else 0,
         "current_file": filename,
         "message": message,
-        "review_url": f"/import/{job.id}/review" if job.status == "review" else None,
+        "proposal_count": proposal_count,
+        "review_ready": review_ready,
+        "review_url": review_url,
         "error": error,
         "file_done": file_done,
         "file_running": file_running,
@@ -438,7 +452,7 @@ async def conditions_wizard_post(request: Request, db: DbDep, user: UserDep):
     queue = list(request.session.get("conditions_queue") or [])
     if not queue:
         return redirect("/draws")
-    form = dict(await request.form())
+    form = dict(await read_form(request))
     action = (form.get("action") or "save").strip()
     item = queue[0]
     draw = db.get(BloodDraw, item.get("id"))
@@ -452,17 +466,32 @@ async def conditions_wizard_post(request: Request, db: DbDep, user: UserDep):
     if request.session["conditions_queue"]:
         return redirect("/import/conditions")
     request.session.pop("conditions_queue", None)
+    cont = (request.session.pop("import_continue_url", None) or "").strip()
+    if cont.startswith("/import/"):
+        return redirect(cont)
     return redirect("/draws")
 
 
 @router.get("/{job_id}/review", response_class=HTMLResponse)
 def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
     job = db.get(ImportJob, job_id)
-    if not job or job.user_id != user.id or job.status != "review":
+    if not job or job.user_id != user.id or job.status not in {"review", "processing"}:
         return redirect("/draws")
-    payload = json.loads(job.proposals_json or "{}")
-    proposals = payload.get("proposals") or []
-    file_errors = payload.get("file_errors") or []
+    raw_payload = job_payload(job)
+    if job.status == "processing" and not (raw_payload.get("proposals") or []):
+        return redirect(f"/import/{job.id}/progress")
+    # Ensure stable uids exist before rendering (confirm drops by uid).
+    # Mid-flight: do not rewrite enriched/sorted proposals — worker may still append.
+    if job.status == "processing":
+        if ensure_proposal_uids(raw_payload):
+            save_job_payload(job, raw_payload)
+            db.commit()
+        proposals, payload = prepare_review_proposals(db, job, raw_payload)
+    else:
+        proposals, payload = prepare_review_proposals(db, job, raw_payload)
+        save_job_payload(job, {**raw_payload, **payload, "proposals": proposals})
+        db.commit()
+    file_errors = list(payload.get("file_errors") or [])
     job_atts = (
         db.query(Attachment)
         .filter(Attachment.import_job_id == job.id)
@@ -486,11 +515,10 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
                     "error": prev.get("error") or (a.ocr_raw_text or "failed")[:500],
                 }
             )
-    # Backfill lab/workplace from per-file extract when older jobs lack proposed_* fields.
+    # Backfill lab/workplace from attachment raw when labs_by_attachment gaps remain.
     labs_by_att = payload.get("labs_by_attachment") or {}
     needs_lab = any(not (p.get("proposed_lab_name") or "").strip() for p in proposals)
     if proposals and needs_lab:
-        changed = False
         for p in proposals:
             att_id = p.get("attachment_id")
             info = labs_by_att.get(str(att_id or "")) or {}
@@ -500,23 +528,18 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
                     lab = _lab_from_attachment_raw(att_by_id[att_id])
                 if lab:
                     p["proposed_lab_name"] = lab
-                    changed = True
             if not (p.get("proposed_workplace") or "").strip():
                 wp = (info.get("workplace") or "").strip()
                 if not wp and att_id in att_by_id:
                     wp = _workplace_from_attachment_raw(att_by_id[att_id])
                 if wp:
                     p["proposed_workplace"] = wp
-                    changed = True
-        if changed:
-            payload["proposals"] = proposals
-            job.proposals_json = json.dumps(payload, ensure_ascii=False)
-            db.commit()
     detected_dates = payload.get("detected_dates") or unique_drawn_dates(proposals)
     multi_date = len(detected_dates) > 1
     lab_name = payload.get("lab_name") or "Laboratoř"
     groups = _build_groups(db, user.id, proposals, lab_name)
     catalog = db.query(Marker).order_by(Marker.name_cs).all()
+    still_running = job.status == "processing" and job_has_active_attachments(db, job.id)
     return templates.TemplateResponse(
         request,
         "import/review.html",
@@ -534,6 +557,8 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             markers=catalog,
             detected_dates=detected_dates,
             multi_date=multi_date,
+            still_running=still_running,
+            progress_url=f"/import/{job.id}/progress",
         ),
     )
 
@@ -579,7 +604,7 @@ async def import_retry_files(request: Request, db: DbDep, user: UserDep, job_id:
     if not job or job.user_id != user.id or job.status not in {"review", "failed", "processing"}:
         return redirect("/draws")
 
-    form = await request.form()
+    form = await read_form(request)
     raw_ids = form.getlist("attachment_id")
     ids: list[int] = []
     for raw in raw_ids:
@@ -628,13 +653,16 @@ def import_discard(request: Request, db: DbDep, locale: LocaleDep, user: UserDep
 @router.post("/{job_id}/confirm")
 async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int):
     job = db.get(ImportJob, job_id)
-    if not job or job.user_id != user.id or job.status != "review":
+    if not job or job.user_id != user.id or job.status not in {"review", "processing"}:
         return redirect("/draws")
 
-    form = await request.form()
+    form = await read_form(request)
     selected = set(form.getlist("selected"))
     count = int(form.get("count") or 0)
     catalog = db.query(Marker).all()
+
+    raw_payload = job_payload(job)
+    _, prepared = prepare_review_proposals(db, job, raw_payload)
 
     # Per-group merge choice + lab/workplace (multi-file imports differ by draw)
     group_choices: dict[str, str] = {}
@@ -651,6 +679,8 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
 
     touched: dict[int, bool] = {}  # draw_id → is_new
     draw_cache: dict = {}  # one draw per group+merge choice within this confirm
+    used_att_ids: set[int] = set()
+    consumed_uids: set[str] = set()
     added = 0
     skipped = 0
     job_attachments = (
@@ -661,6 +691,7 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
     for idx in range(count):
         if str(idx) not in selected:
             continue
+        uid = (form.get(f"uid_{idx}") or "").strip()
         label = (form.get(f"label_{idx}") or "").strip()
         value_raw = form.get(f"value_{idx}")
         if value_raw in (None, ""):
@@ -734,6 +765,8 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             unit=unit,
         ):
             skipped += 1
+            if uid:
+                consumed_uids.add(uid)
             continue
 
         att_id_raw = form.get(f"attachment_id_{idx}")
@@ -762,13 +795,46 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             )
         )
         added += 1
+        if attachment_id is not None:
+            used_att_ids.add(attachment_id)
+        if uid:
+            consumed_uids.add(uid)
 
-    # Link all job attachments to all touched draws (M2M)
+    # Link only attachments that contributed confirmed rows (progressive confirm safe).
     for draw_id in touched:
-        for att in job_attachments:
-            link_attachment_to_draw(db, draw_id, att.id)
+        for att_id in used_att_ids:
+            link_attachment_to_draw(db, draw_id, att_id)
 
-    job.status = "confirmed"
+    # Re-read payload: worker may have appended while user confirmed.
+    db.refresh(job)
+    fresh = job_payload(job)
+    remaining = [
+        p
+        for p in (fresh.get("proposals") or [])
+        if (p.get("uid") or "").strip() not in consumed_uids
+    ]
+
+    still_active = job_has_active_attachments(db, job.id)
+    failed_left = any(a.ocr_status == "failed" for a in job_attachments)
+
+    next_payload = {
+        **fresh,
+        "proposals": remaining,
+        "detected_dates": unique_drawn_dates(remaining),
+        "lab_name": prepared.get("lab_name") or fresh.get("lab_name") or "Laboratoř",
+    }
+    save_job_payload(job, next_payload)
+
+    if still_active:
+        job.status = "processing"
+        continue_url = f"/import/{job.id}/progress"
+    elif remaining or failed_left:
+        job.status = "review"
+        continue_url = f"/import/{job.id}/review"
+    else:
+        job.status = "confirmed"
+        continue_url = "/draws"
+
     db.commit()
 
     if added or skipped:
@@ -778,6 +844,12 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
         request.session["conditions_queue"] = [
             {"id": did, "is_new": bool(is_new)} for did, is_new in touched.items()
         ]
+        if continue_url != "/draws":
+            request.session["import_continue_url"] = continue_url
+        else:
+            request.session.pop("import_continue_url", None)
         return redirect("/import/conditions")
 
+    if continue_url != "/draws":
+        return redirect(continue_url)
     return redirect("/draws")

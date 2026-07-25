@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     max_attachments_per_draw: int = 10
     # Soft cap per import job (batch upload)
     max_import_files: int = 40
+    # Starlette default is 1000 form fields — review has ~12 fields/row
+    max_form_fields: int = 20000
+    max_form_files: int = 100
     # Parallel Smart/classic extracts in the in-process worker
     import_worker_concurrency: int = 2
     # Max wall time per file before soft-fail and continue the batch (seconds)

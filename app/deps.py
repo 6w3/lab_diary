@@ -7,9 +7,23 @@ from sqlalchemy.orm import Session
 from starlette.responses import RedirectResponse
 
 from app.db import get_db
+from app.config import get_settings
 from app.i18n import t
 from app.models import User
 from app.services.ref_range import format_ref_range
+
+
+async def read_form(request: Request):
+    """Parse form body with limits sized for large import review tables.
+
+    Starlette defaults to max_fields=1000; each review row is ~12 fields, so
+    multi-file imports easily exceed that on confirm.
+    """
+    settings = get_settings()
+    return await request.form(
+        max_fields=settings.max_form_fields,
+        max_files=settings.max_form_files,
+    )
 
 
 def get_locale(request: Request) -> str:

@@ -11,7 +11,7 @@ from app.deps import DbDep, LocaleDep, UserDep, template_context
 from app.models import BloodDraw, CustomMarker, Marker, ResultValue
 from app.services.markers import MARKER_CATEGORY_LABELS, marker_category, marker_sort_key
 from app.services.trend_points import collapse_points_per_draw
-from app.services.units import to_canonical
+from app.services.units import format_unit, to_canonical
 
 router = APIRouter(tags=["trends"])
 templates = Jinja2Templates(directory="app/templates")
@@ -147,6 +147,7 @@ def trends(
                 "key": key,
                 "name": meta["name"],
                 "unit": unit,
+                "unit_axis": format_unit(unit, marker_name=meta["name"], with_substance=True),
                 "category": meta["category"],
                 "category_label": meta["category_label"],
                 "labels": labels,

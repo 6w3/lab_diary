@@ -127,6 +127,14 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
   color: var(--muted);
 }
 .file-status-list li { padding: 0.15rem 0; }
+.progress-review-cta {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: center;
+  margin: 0.75rem 0 1rem;
+  text-align: center;
+}
+.review-running-banner { margin-bottom: 1rem; }
 .check { display: flex; align-items: center; gap: 0.5rem; }
 .group-lab-fields {
   display: grid;

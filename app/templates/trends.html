@@ -311,7 +311,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
           },
           ticks: { autoSkip: true, maxRotation: 45, minRotation: 0 },
         },
-        y: { beginAtZero: false, title: { display: !!c.unit, text: c.unit } },
+        y: { beginAtZero: false, title: { display: !!(c.unit_axis || c.unit), text: c.unit_axis || c.unit } },
       },
     },
     plugins: [tipBandPlugin(c.tip_low, c.tip_high)],

@@ -1,6 +1,9 @@
 from app.services.ocr_parse import normalize_unit
 from app.services.units import (
     convert_value,
+    format_unit,
+    is_molar_unit,
+    same_quantity,
     to_canonical,
     unit_group_for_marker,
     unit_options_for_marker,
@@ -96,3 +99,77 @@ def test_detected_outside_group_prepended():
     opts = unit_options_for_marker("cholesterol", default_unit="mmol/l", detected="ukat/l")
     assert opts[0] == "ukat/l"
     assert "mmol/l" in opts
+
+
+def test_mass_molar_without_marker_fails():
+    v, ok = convert_value(5.0, "mmol/l", "mg/dl")
+    assert not ok
+    assert v == 5.0
+
+
+def test_mass_molar_wrong_marker_fails():
+    # sodium is mmol-only (no mass factor / no mg/dl option)
+    v, ok = convert_value(140.0, "mmol/l", "mg/dl", marker_code="sodium")
+    assert not ok
+
+
+def test_bilirubin_mg_dl_to_umol():
+    v, ok = convert_value(1.0, "mg/dl", "umol/l", marker_code="bilirubin")
+    assert ok
+    assert abs(v - 17.1) < 1e-6
+
+
+def test_estradiol_pg_to_pmol():
+    v, ok = convert_value(100.0, "pg/ml", "pmol/l", marker_code="estradiol")
+    assert ok
+    assert abs(v - 367.1) < 0.1
+
+
+def test_phosphorus_mg_dl_to_mmol():
+    v, ok = convert_value(3.1, "mg/dl", "mmol/l", marker_code="phosphorus")
+    assert ok
+    assert abs(v - 3.1 * 0.323) < 1e-6
+
+
+def test_ft4_ng_dl_to_pmol():
+    v, ok = convert_value(1.0, "ng/dl", "pmol/l", marker_code="ft4")
+    assert ok
+    assert abs(v - 12.87) < 1e-6
+
+
+def test_lactate_mg_dl_to_mmol():
+    v, ok = convert_value(9.0, "mg/dl", "mmol/l", marker_code="lactate")
+    assert ok
+    assert abs(v - 0.999) < 1e-9  # 9 × 0.111
+
+
+def test_glucose_and_cholesterol_different_mass_factors():
+    g, gok = convert_value(1.0, "mmol/l", "mg/dl", marker_code="glucose")
+    c, cok = convert_value(1.0, "mmol/l", "mg/dl", marker_code="cholesterol")
+    assert gok and cok
+    assert abs(g - 18.0182) < 1e-3
+    assert abs(c - 38.67) < 1e-3
+    assert abs(g - c) > 1.0
+
+
+def test_molar_prefix_scale_without_marker():
+    v, ok = convert_value(1.0, "mmol/l", "umol/l")
+    assert ok
+    assert abs(v - 1000.0) < 1e-6
+    v2, ok2 = convert_value(1000.0, "umol/l", "nmol/l")
+    assert ok2
+    assert abs(v2 - 1_000_000.0) < 1e-3
+
+
+def test_same_quantity_molar_mass_needs_marker():
+    assert not same_quantity("mmol/l", "mg/dl")
+    assert same_quantity("mmol/l", "mg/dl", marker_code="glucose")
+    assert same_quantity("mmol/l", "umol/l")
+
+
+def test_format_unit_with_substance():
+    assert format_unit("mmol/l") == "mmol/l"
+    assert format_unit("mmol/l", marker_name="Glukóza", with_substance=True) == "mmol/l (Glukóza)"
+    assert format_unit("g/l", marker_name="Hemoglobin", with_substance=True) == "g/l"
+    assert is_molar_unit("umol/l")
+    assert not is_molar_unit("g/l")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -88,6 +89,7 @@ def enrich_proposals(
         )
         out.append(
             {
+                "uid": (str(p.get("uid") or "").strip() or None),
                 "marker_code": matched.code if matched else "",
                 "label": label,
                 "value": p.get("value"),
@@ -105,16 +107,30 @@ def enrich_proposals(
     return out
 
 
-def finalize_job(db: Session, job: ImportJob) -> None:
+def ensure_proposal_uids(payload: dict) -> bool:
+    """Backfill missing proposal uids in-place. Returns True if anything changed."""
+    changed = False
+    for p in payload.get("proposals") or []:
+        if not (p.get("uid") or "").strip():
+            p["uid"] = secrets.token_hex(8)
+            changed = True
+    return changed
+
+
+def prepare_review_proposals(db: Session, job: ImportJob, payload: dict | None = None) -> tuple[list[dict], dict]:
+    """Enrich proposals for review UI — works mid-flight (status=processing) too.
+
+    Returns (enriched_proposals, payload_with_defaults). Does not change job.status.
+    """
     from app.services.proposal_filter import filter_proposals
 
-    payload = job_payload(job)
+    payload = dict(payload if payload is not None else job_payload(job))
     catalog = db.query(Marker).all()
     user_aliases = load_user_aliases(db, job.user_id)
     all_proposals = filter_proposals(list(payload.get("proposals") or []))
     detected_lab = (payload.get("detected_lab") or "").strip()
     form_lab = (payload.get("lab_name_form") or "").strip()
-    default_lab = form_lab or detected_lab or "Laboratoř"
+    default_lab = (payload.get("lab_name") or "").strip() or form_lab or detected_lab or "Laboratoř"
     labs_by_att = payload.get("labs_by_attachment") or {}
     for p in all_proposals:
         if not (p.get("proposed_lab_name") or "").strip():
@@ -141,19 +157,37 @@ def finalize_job(db: Session, job: ImportJob) -> None:
         allow_fuzzy=True,
     )
     enriched = filter_proposals(enriched)
+    # Stable ids so progressive confirm can drop rows while worker still appends.
+    for p in enriched:
+        if not (p.get("uid") or "").strip():
+            p["uid"] = secrets.token_hex(8)
     detected_dates = unique_drawn_dates(enriched)
+    payload["lab_name"] = default_lab
+    payload["proposals"] = enriched
+    payload["detected_dates"] = detected_dates
+    return enriched, payload
+
+
+def finalize_job(db: Session, job: ImportJob) -> None:
+    enriched, payload = prepare_review_proposals(db, job)
     raw_parts = payload.get("raw_parts") or []
     job.ocr_raw_text = "\n\n".join(raw_parts) if raw_parts else job.ocr_raw_text
     atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
     file_errors = list(payload.get("file_errors") or [])
+    labs_by_att = payload.get("labs_by_attachment") or {}
+    detected_lab = (payload.get("detected_lab") or "").strip()
+    detected_dates = payload.get("detected_dates") or unique_drawn_dates(enriched)
     save_job_payload(
         job,
         {
-            "lab_name": default_lab,
+            "lab_name": payload.get("lab_name") or "Laboratoř",
             "proposals": enriched,
             "detected_dates": detected_dates,
             "file_errors": file_errors,
             "labs_by_attachment": labs_by_att,
+            "lab_name_form": payload.get("lab_name_form") or "",
+            "detected_lab": detected_lab,
+            "raw_parts": raw_parts,
             "extract_meta": {
                 "source": job.extract_mode,
                 "dates": detected_dates,
@@ -230,6 +264,10 @@ def _done_attachment_count(db: Session, job_id: int) -> int:
         .filter(Attachment.import_job_id == job_id, Attachment.ocr_status == "done")
         .count()
     )
+
+
+def job_has_active_attachments(db: Session, job_id: int) -> bool:
+    return _active_attachment_count(db, job_id) > 0
 
 
 def finish_job_if_idle(db: Session, job: ImportJob) -> bool:
@@ -465,6 +503,7 @@ def process_claimed_attachment(
     for p in filter_proposals(proposals):
         row = dict(p)
         row["attachment_id"] = att.id
+        row["uid"] = secrets.token_hex(8)
         if file_lab and not (row.get("proposed_lab_name") or "").strip():
             row["proposed_lab_name"] = file_lab
         if file_wp and not (row.get("proposed_workplace") or "").strip():
