@@ -61,7 +61,7 @@ Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). 
 Upload is **import-first** (`/import`): one batch can create/extend multiple draws. Never silent-merge by day+lab — review asks merge vs new draw. Files link via `draw_attachments` M2M. Dedup identical results on confirm. Conditions wizard after confirm (create new / edit existing). Split selected results on draw detail if merged by mistake.
 
 **Progressive import**:
-1. **Soubory** (`/import/{id}/progress`) — per-file preview + read-only biomarkers, re-extract/delete; continue mid-flight OK.
+1. **Soubory** (`/import/{id}/progress`) — per-file preview + read-only biomarkers, re-extract/delete; **Done, hide** collapses verified cards (localStorage per job) so user focuses on failures/odd ones; continue mid-flight OK.
 2. **Odběry** (`/import/{id}/review`) — merge by date, edit/confirm. Back link to Soubory.
 Confirm drops by proposal `uid`. After conditions wizard, return via `import_continue_url`.
 
@@ -69,8 +69,8 @@ Smart extract:
 
 - Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).
 - Date discovery must classify `single` vs `multi_column`; never force consecutive calendar-day spam.
+- **Lab results gate**: Smart first classifies `doc_kind` — only `lab_results` (measured values+units) may emit biomarkers. Žádanka / other non-result docs → `not_lab_results`, empty draws.
 - Discard / retry when output looks hallucinated (one marker, many dates, all zeros).
-- **Žádanka / order form**: checkbox request sheets without measured values → `doc_kind=order_form`, empty draws (do not invent CBC from ticks).
 - Never silent-fall back to classic OCR when Smart fails.
 - EHR screenshots (PC DOKTOR): single draw, extract **all** visible analytes.
 

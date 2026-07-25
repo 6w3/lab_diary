@@ -109,11 +109,53 @@ def test_order_form_payload_cleared():
         }
     )
     assert out["draws"] == []
-    assert "order_form_no_results" in out["warnings"]
+    assert out["doc_kind"] == "not_lab_results"
+    assert "not_lab_results" in out["warnings"]
+
+
+def test_not_lab_results_payload_cleared():
+    from app.services.smart_extract import _validate_smart_payload
+
+    out = _validate_smart_payload(
+        {
+            "doc_kind": "not_lab_results",
+            "draws": [
+                {
+                    "drawn_on": "2020-02-01",
+                    "results": [
+                        {"label": "Hemoglobin", "marker_code": "hgb", "value": 8.0, "unit": "g/dl"},
+                    ],
+                }
+            ],
+        }
+    )
+    assert out["draws"] == []
+    assert out["doc_kind"] == "not_lab_results"
+
+
+def test_lab_results_payload_kept_when_doc_kind_omitted():
+    from app.services.smart_extract import _validate_smart_payload
+
+    out = _validate_smart_payload(
+        {
+            "draws": [
+                {
+                    "drawn_on": "2020-02-01",
+                    "results": [
+                        {"label": "Hemoglobin", "marker_code": "hgb", "value": 150.0, "unit": "g/l"},
+                        {"label": "Leukocyty", "marker_code": "wbc", "value": 6.0, "unit": "10^9/l"},
+                    ],
+                }
+            ],
+        }
+    )
+    assert len(out["draws"]) == 1
+    assert len(out["draws"][0]["results"]) == 2
+    assert out["doc_kind"] == "lab_results"
 
 
 def test_order_form_hallucination_cbc_without_refs():
-    from app.services.smart_extract import looks_like_order_form_hallucination
+    from app.services.smart_extract import looks_like_non_lab_hallucination
 
     props = [
         {"marker_code": "wbc", "label": "Leukocyty", "value": 11.0, "proposed_drawn_on": "2020-02-01"},
@@ -131,19 +173,20 @@ def test_order_form_hallucination_cbc_without_refs():
         {"marker_code": "basophils", "label": "Bazofily", "value": 0.0, "proposed_drawn_on": "2020-02-01"},
         {"marker_code": "rdw", "label": "RDW", "value": 13.0, "proposed_drawn_on": "2020-02-01"},
     ]
-    assert looks_like_order_form_hallucination(props)
+    assert looks_like_non_lab_hallucination(props)
 
     # Real KO with refs must pass
     with_refs = [{**p, "lab_ref_low": 1.0, "lab_ref_high": 2.0} for p in props]
-    assert not looks_like_order_form_hallucination(with_refs)
+    assert not looks_like_non_lab_hallucination(with_refs)
 
 
 def test_normalize_doc_kind():
     from app.services.smart_extract import _normalize_doc_kind
 
-    assert _normalize_doc_kind("order_form") == "order_form"
-    assert _normalize_doc_kind("žádanka") == "order_form"
     assert _normalize_doc_kind("lab_results") == "lab_results"
+    assert _normalize_doc_kind("not_lab_results") == "not_lab_results"
+    assert _normalize_doc_kind("order_form") == "not_lab_results"
+    assert _normalize_doc_kind("žádanka") == "not_lab_results"
     assert _normalize_doc_kind("nope") == "unknown"
 
 

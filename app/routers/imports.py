@@ -195,7 +195,7 @@ def _file_verify_cards(job: ImportJob, db, *, locale: str) -> tuple[list, str]:
                 status_label=status_labels.get(a.ocr_status, a.ocr_status),
                 markers=markers,
                 can_act=a.ocr_status in {"done", "failed"},
-                preview_ready=a.ocr_status in {"done", "failed", "processing"},
+                busy=a.ocr_status in {"pending", "processing"},
             )
         )
         sig_parts.append(f"{a.id}:{a.ocr_status}:{len(markers)}")

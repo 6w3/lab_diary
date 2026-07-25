@@ -218,6 +218,37 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
   align-content: start;
   min-width: 9rem;
 }
+.file-side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.file-side-actions .file-hide-ok,
+.file-side-actions .reextract-delete button {
+  width: 100%;
+  white-space: nowrap;
+}
+.import-hidden-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  align-items: center;
+  margin: 0 0 0.75rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px dashed var(--border);
+}
+button.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.file-verify-card.is-user-hidden,
+.file-verify-card[hidden] { display: none; }
 .reextract-delete { margin: 0; }
 .reextract-delete button.danger {
   background: transparent;
@@ -344,6 +375,45 @@ th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: le
 }
 .import-steps a { color: inherit; }
 .import-files-step { text-align: left; }
+.import-status-line {
+  margin: 0.35rem 0 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 500;
+}
+.import-status-meta { margin: 0 0 1rem; font-size: 0.88rem; }
+.progress-bar-slim {
+  width: 100%;
+  max-width: none;
+  height: 0.35rem;
+  margin: 0 0 0.35rem;
+}
+.file-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.spinner-inline {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-width: 2px;
+  margin: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+.file-busy-side {
+  display: grid;
+  place-items: center;
+  min-width: 3rem;
+  padding-top: 0.35rem;
+}
+.file-busy-side .spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 0;
+}
+.file-verify-card.is-busy {
+  opacity: 0.92;
+}
 .import-progress-head {
   margin-bottom: 1rem;
   text-align: center;

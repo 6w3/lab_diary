@@ -7,7 +7,9 @@
          data-files-sig="{{ files_sig }}"
          data-review-url="{{ review_url }}"
          data-continue-label="{{ t('import_continue_to_draws') }}"
-         data-continue-count-label="{{ t('import_review_ready') }}">
+         data-continue-count-label="{{ t('import_review_ready') }}"
+         data-hidden-count-label="{{ t('import_hidden_ok_count') }}"
+         data-show-hidden-label="{{ t('import_show_hidden') }}">
   <p class="import-steps muted">
     <strong>{{ t('import_step_files') }}</strong>
     <span aria-hidden="true">→</span>
@@ -16,17 +18,16 @@
   <h1>{{ t('import_files_step_title') }}</h1>
   <p class="muted">{{ t('import_files_step_hint') }}</p>
 
-  <div class="import-progress-head card" {% if progress.status == 'review' and not progress.running and not progress.queued %}hidden{% endif %}>
-    <div class="spinner" aria-hidden="true" id="progress-spinner"
-         {% if progress.status in ['review', 'failed'] and not progress.running %}hidden{% endif %}></div>
-    <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
-    <p class="muted">{{ t('import_progress_server_hint') }}</p>
-    <div class="progress-bar" role="progressbar"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}">
-      <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
-    </div>
-    <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
+  <p class="import-status-line" id="progress-status">{{ progress.message }}</p>
+  <div class="progress-bar progress-bar-slim" role="progressbar"
+       aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}"
+       {% if progress.status == 'review' and not progress.running and not progress.queued %}hidden{% endif %}>
+    <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
   </div>
+  <p class="muted import-status-meta">
+    <span id="progress-count">{{ progress.done }} / {{ progress.total }}</span>
+    · {{ t('import_progress_server_hint') }}
+  </p>
 
   <p id="progress-review-cta" class="progress-review-cta"
      {% if not progress.review_ready %}hidden{% endif %}>
@@ -69,22 +70,31 @@
     <a class="btn" href="/import">{{ t('upload_report') }}</a>
   </p>
 
+  <p class="import-hidden-bar muted" id="import-hidden-bar" hidden>
+    <span id="import-hidden-count"></span>
+    <button type="button" class="linkish" id="import-show-hidden">{{ t('import_show_hidden') }}</button>
+  </p>
+
   <section class="file-verify-list" aria-label="{{ t('import_files_step_title') }}">
     {% for a in file_cards %}
-    <article class="card reextract-row file-verify-card" data-att-id="{{ a.id }}" data-status="{{ a.status }}">
-      {% if a.preview_ready %}
+    <article class="card reextract-row file-verify-card {% if a.busy %}is-busy{% endif %}"
+             data-att-id="{{ a.id }}" data-status="{{ a.status }}">
       <a class="att-preview-link" href="/import/{{ job.id }}/attachment/{{ a.id }}/preview" target="_blank" rel="noopener">
         <img class="att-preview" src="/import/{{ job.id }}/attachment/{{ a.id }}/preview"
              alt="{{ a.display_name }}" loading="lazy" width="360" height="240">
       </a>
-      {% else %}
-      <div class="att-preview-placeholder muted">{{ a.status_label }}…</div>
-      {% endif %}
 
       <div class="reextract-form">
         <div class="reextract-head">
           <strong>{{ a.display_name }}</strong>
-          <span class="muted">{{ a.status_label }}</span>
+          {% if a.busy %}
+          <span class="file-busy" aria-live="polite">
+            <span class="spinner spinner-inline" aria-hidden="true"></span>
+            <span class="muted">{{ t('import_file_reading') }}</span>
+          </span>
+          {% elif a.status == 'failed' %}
+          <span class="error">{{ a.status_label }}</span>
+          {% endif %}
         </div>
         {% if a.can_act and smart_available %}
         <form method="post" action="/import/{{ job.id }}/reextract">
@@ -97,21 +107,27 @@
             <button type="submit" class="secondary">{{ t('import_reextract_submit') }}</button>
           </div>
         </form>
-        {% elif a.status in ['pending', 'processing'] %}
-        <p class="muted">{{ t('import_file_waiting') }}</p>
         {% endif %}
       </div>
 
       <div class="reextract-side">
-        {% if a.can_act %}
-        <form method="post" action="/import/{{ job.id }}/remove-file" class="reextract-delete"
-              data-confirm="{{ t('import_remove_file_confirm') }}"
-              onsubmit="return confirm(this.getAttribute('data-confirm'))">
-          <input type="hidden" name="attachment_id" value="{{ a.id }}">
-          <button type="submit" class="danger">{{ t('import_remove_file') }}</button>
-        </form>
-        {% endif %}
-        {% if a.status == 'done' or a.markers %}
+        {% if a.busy %}
+        <div class="file-busy-side" aria-hidden="true">
+          <span class="spinner"></span>
+        </div>
+        {% elif a.can_act %}
+        <div class="file-side-actions">
+          {% if a.status == 'done' %}
+          <button type="button" class="secondary file-hide-ok"
+                  data-hide-att="{{ a.id }}">{{ t('import_hide_ok') }}</button>
+          {% endif %}
+          <form method="post" action="/import/{{ job.id }}/remove-file" class="reextract-delete"
+                data-confirm="{{ t('import_remove_file_confirm') }}"
+                onsubmit="return confirm(this.getAttribute('data-confirm'))">
+            <input type="hidden" name="attachment_id" value="{{ a.id }}">
+            <button type="submit" class="danger">{{ t('import_remove_file') }}</button>
+          </form>
+        </div>
         <details class="att-markers" {% if a.markers %}open{% endif %}>
           <summary>{{ t('import_file_markers', count=a.markers|length) }}</summary>
           {% if a.markers %}
@@ -142,6 +158,81 @@
   const root = document.getElementById("import-progress");
   if (!root) return;
   const jobId = root.dataset.jobId;
+  const storageKey = "lab_diary_import_hidden_" + jobId;
+  const countTpl = root.dataset.hiddenCountLabel || "Hidden OK: {count}";
+  const barEl = document.getElementById("import-hidden-bar");
+  const countEl = document.getElementById("import-hidden-count");
+  const showBtn = document.getElementById("import-show-hidden");
+
+  function loadHidden() {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set((Array.isArray(arr) ? arr : []).map(String));
+    } catch (e) {
+      return new Set();
+    }
+  }
+
+  function saveHidden(set) {
+    localStorage.setItem(storageKey, JSON.stringify(Array.from(set)));
+  }
+
+  function applyHidden() {
+    const hidden = loadHidden();
+    const cards = root.querySelectorAll(".file-verify-card[data-att-id]");
+    let visibleHidden = 0;
+    cards.forEach(function (card) {
+      const id = String(card.getAttribute("data-att-id") || "");
+      const isHidden = hidden.has(id);
+      card.classList.toggle("is-user-hidden", isHidden);
+      card.hidden = isHidden;
+      if (isHidden) visibleHidden += 1;
+    });
+    // Drop stale ids (deleted files)
+    const alive = new Set();
+    cards.forEach(function (card) {
+      alive.add(String(card.getAttribute("data-att-id") || ""));
+    });
+    let changed = false;
+    hidden.forEach(function (id) {
+      if (!alive.has(id)) {
+        hidden.delete(id);
+        changed = true;
+      }
+    });
+    if (changed) saveHidden(hidden);
+    if (barEl) {
+      barEl.hidden = visibleHidden === 0;
+      if (countEl) countEl.textContent = countTpl.replace("{count}", String(visibleHidden));
+    }
+  }
+
+  root.addEventListener("click", function (ev) {
+    const btn = ev.target.closest("[data-hide-att]");
+    if (!btn || !root.contains(btn)) return;
+    const id = String(btn.getAttribute("data-hide-att") || "");
+    if (!id) return;
+    const hidden = loadHidden();
+    hidden.add(id);
+    saveHidden(hidden);
+    applyHidden();
+  });
+
+  if (showBtn) {
+    showBtn.addEventListener("click", function () {
+      saveHidden(new Set());
+      applyHidden();
+    });
+  }
+
+  applyHidden();
+})();
+
+(function () {
+  const root = document.getElementById("import-progress");
+  if (!root) return;
+  const jobId = root.dataset.jobId;
   const continueLabel = root.dataset.continueLabel || "Continue";
   const continueCountTpl = root.dataset.continueCountLabel || "Review ready ({count})";
   const statusEl = document.getElementById("progress-status");
@@ -156,10 +247,7 @@
   const reviewCta = document.getElementById("progress-review-cta");
   const reviewLink = document.getElementById("progress-review-link");
   const bar = root.querySelector(".progress-bar");
-  const spinner = document.getElementById("progress-spinner");
-  const head = root.querySelector(".import-progress-head");
   let stopped = false;
-  let timer = null;
   let filesSig = root.dataset.filesSig || "";
 
   function esc(s) {
@@ -219,7 +307,11 @@
   function apply(data) {
     if (statusEl) statusEl.textContent = data.message || "";
     if (fillEl) fillEl.style.width = (data.percent || 0) + "%";
-    if (bar) bar.setAttribute("aria-valuenow", String(data.percent || 0));
+    if (bar) {
+      bar.setAttribute("aria-valuenow", String(data.percent || 0));
+      const busy = (data.running || 0) > 0 || (data.queued || 0) > 0;
+      bar.hidden = data.status === "review" && !busy;
+    }
     if (countEl) countEl.textContent = (data.done || 0) + " / " + (data.total || 0);
     renderFileErrors(data.file_errors);
     renderReviewCta(data);
@@ -232,9 +324,6 @@
     if (nextSig) filesSig = nextSig;
 
     const busy = (data.running || 0) > 0 || (data.queued || 0) > 0;
-    if (spinner) spinner.hidden = !busy;
-    if (head && data.status === "review" && !busy) head.hidden = true;
-
     if (data.status === "failed" && !busy) {
       stopped = true;
       root.classList.add("is-failed");
@@ -245,7 +334,6 @@
       if (actionsEl) actionsEl.hidden = false;
       return true;
     }
-    // Stay on this page when batch reaches review — user continues manually.
     if (data.status === "review" && !busy) {
       stopped = true;
       return true;
@@ -265,7 +353,7 @@
     } catch (err) {
       if (statusEl) statusEl.textContent = String(err);
     }
-    timer = setTimeout(poll, 1000);
+    setTimeout(poll, 1000);
   }
 
   if (root.dataset.status === "failed") {
@@ -273,7 +361,6 @@
     return;
   }
   if (root.dataset.status === "review") {
-    // Batch finished — no auto-redirect; CTA visible when review_ready.
     return;
   }
   poll();
