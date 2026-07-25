@@ -4,7 +4,9 @@
 <section class="import-progress card" id="import-progress"
          data-job-id="{{ job.id }}"
          data-status="{{ progress.status }}"
-         data-review-url="/import/{{ job.id }}/review">
+         data-review-url="/import/{{ job.id }}/review"
+         data-retry-label="{{ t('import_retry_file') }}"
+         data-retry-all-label="{{ t('import_retry_all_failed') }}">
   <h1>{{ t('import_progress_title') }}</h1>
   <div class="spinner" aria-hidden="true"></div>
   <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
@@ -14,11 +16,28 @@
     <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
   </div>
   <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
-  <ul class="error-list muted" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
-    {% for e in progress.file_errors or [] %}
-      <li><strong>{{ e.filename }}</strong>: {{ e.error }}</li>
-    {% endfor %}
-  </ul>
+  <div class="card error-box" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
+    <p><strong>{{ t('import_file_errors_title') }}</strong></p>
+    <p class="muted" id="progress-retry-hint">{{ t('import_retry_while_running_hint') }}</p>
+    <ul class="file-error-list" id="progress-file-error-list">
+      {% for e in progress.file_errors or [] %}
+        <li>
+          <span><strong>{{ e.filename }}</strong>: {{ e.error }}</span>
+          {% if e.attachment_id %}
+          <form method="post" action="/import/{{ job.id }}/retry-files" class="inline-form">
+            <input type="hidden" name="attachment_id" value="{{ e.attachment_id }}">
+            <button type="submit" class="secondary">{{ t('import_retry_file') }}</button>
+          </form>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/import/{{ job.id }}/retry-files" id="progress-retry-all"
+          {% if (progress.file_errors or [])|length < 2 %}hidden{% endif %}>
+      <input type="hidden" name="retry_all" value="1">
+      <button type="submit" class="secondary">{{ t('import_retry_all_failed') }}</button>
+    </form>
+  </div>
   <p class="error" id="progress-error" {% if progress.status != 'failed' %}hidden{% endif %}>{{ progress.error or progress.message }}</p>
   <p id="progress-actions" {% if progress.status != 'failed' %}hidden{% endif %}>
     <a class="btn" href="/import">{{ t('upload_report') }}</a>
@@ -29,34 +48,50 @@
   const root = document.getElementById("import-progress");
   if (!root) return;
   const jobId = root.dataset.jobId;
+  const retryLabel = root.dataset.retryLabel || "Retry";
   const statusEl = document.getElementById("progress-status");
   const fillEl = document.getElementById("progress-fill");
   const countEl = document.getElementById("progress-count");
   const errorEl = document.getElementById("progress-error");
-  const fileErrEl = document.getElementById("progress-file-errors");
+  const fileErrBox = document.getElementById("progress-file-errors");
+  const fileErrList = document.getElementById("progress-file-error-list");
+  const retryAllForm = document.getElementById("progress-retry-all");
   const actionsEl = document.getElementById("progress-actions");
   const bar = root.querySelector(".progress-bar");
   let stopped = false;
   let timer = null;
 
+  function esc(s) {
+    return String(s || "").replace(/[<>&]/g, function (c) {
+      return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
+    });
+  }
+
   function renderFileErrors(errors) {
-    if (!fileErrEl) return;
+    if (!fileErrBox || !fileErrList) return;
     const list = Array.isArray(errors) ? errors : [];
     if (!list.length) {
-      fileErrEl.hidden = true;
-      fileErrEl.innerHTML = "";
+      fileErrBox.hidden = true;
+      fileErrList.innerHTML = "";
+      if (retryAllForm) retryAllForm.hidden = true;
       return;
     }
-    fileErrEl.hidden = false;
-    fileErrEl.innerHTML = list.map(function (e) {
-      const name = (e.filename || "file").replace(/[<>&]/g, function (c) {
-        return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
-      });
-      const err = String(e.error || "failed").replace(/[<>&]/g, function (c) {
-        return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
-      });
-      return "<li><strong>" + name + "</strong>: " + err + "</li>";
+    fileErrBox.hidden = false;
+    fileErrList.innerHTML = list.map(function (e) {
+      const name = esc(e.filename || "file");
+      const err = esc(e.error || "failed");
+      const id = e.attachment_id;
+      let btn = "";
+      if (id) {
+        btn =
+          '<form method="post" action="/import/' + jobId + '/retry-files" class="inline-form">' +
+          '<input type="hidden" name="attachment_id" value="' + esc(id) + '">' +
+          '<button type="submit" class="secondary">' + esc(retryLabel) + "</button>" +
+          "</form>";
+      }
+      return "<li><span><strong>" + name + "</strong>: " + err + "</span>" + btn + "</li>";
     }).join("");
+    if (retryAllForm) retryAllForm.hidden = list.length < 2;
   }
 
   function apply(data) {

@@ -44,6 +44,7 @@
   "import_file_error_item": "Soubor {label}",
   "import_retry_file": "Zkusit znovu",
   "import_retry_all_failed": "Zkusit všechny selhané znovu",
+  "import_retry_while_running_hint": "Další selhané můžeš zařadit hned — nemusíš čekat na doběhnutí aktuálního.",
   "open_imports_title": "Reporty ke kontrole",
   "import_status_processing": "načítá se",
   "import_status_review": "ke kontrole",

@@ -44,6 +44,7 @@
   "import_file_error_item": "File {label}",
   "import_retry_file": "Retry",
   "import_retry_all_failed": "Retry all failed",
+  "import_retry_while_running_hint": "You can queue other failed files now — no need to wait for the current one.",
   "open_imports_title": "Reports to review",
   "import_status_processing": "processing",
   "import_status_review": "ready for review",

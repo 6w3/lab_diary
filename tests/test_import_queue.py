@@ -201,3 +201,30 @@ def test_retry_failed_attachments_requeues():
     payload = job_payload(job)
     assert payload["proposals"]
     assert payload.get("file_errors") == []
+
+
+def test_retry_failed_attachments_while_processing():
+    """User can queue another failed file without waiting for the first retry."""
+    job = SimpleNamespace(
+        id=1,
+        status="processing",
+        proposals_json='{"proposals":[{"label":"HGB"}],"file_errors":[{"attachment_id":12,"filename":"c.jpg","error":"timeout"}]}',
+        user_id=1,
+        ocr_raw_text=None,
+    )
+    done = SimpleNamespace(
+        id=10, import_job_id=1, ocr_status="done", filename="a.jpg", ocr_raw_text="ok"
+    )
+    running = SimpleNamespace(
+        id=11, import_job_id=1, ocr_status="processing", filename="b.jpg", ocr_raw_text=None
+    )
+    failed = SimpleNamespace(
+        id=12, import_job_id=1, ocr_status="failed", filename="c.jpg", ocr_raw_text="timeout"
+    )
+    db = _FakeDB(attachments=[done, running, failed], jobs=[job])
+    n = retry_failed_attachments(db, job, attachment_ids=[12])
+    assert n == 1
+    assert failed.ocr_status == "pending"
+    assert running.ocr_status == "processing"
+    assert job.status == "processing"
+    assert job_payload(job).get("file_errors") == []

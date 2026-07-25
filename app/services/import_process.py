@@ -306,9 +306,10 @@ def retry_failed_attachments(
 ) -> int:
     """Re-queue failed attachments for another extract attempt. Returns count queued.
 
-    Keeps existing proposals. Job must be in review (or failed with partial data).
+    Keeps existing proposals. Allowed while review/failed, or already processing
+    (so user can queue more failed files without waiting for the current one).
     """
-    if job.status not in {"review", "failed"}:
+    if job.status not in {"review", "failed", "processing"}:
         return 0
     atts = (
         db.query(Attachment)

@@ -527,9 +527,13 @@ def _workplace_from_attachment_raw(att: Attachment) -> str:
 
 @router.post("/{job_id}/retry-files")
 async def import_retry_files(request: Request, db: DbDep, user: UserDep, job_id: int):
-    """Re-queue one or more failed attachments; keep successful proposals."""
+    """Re-queue one or more failed attachments; keep successful proposals.
+
+    Works while job is already processing so remaining failed files can be
+    queued one-by-one from the progress page without waiting.
+    """
     job = db.get(ImportJob, job_id)
-    if not job or job.user_id != user.id or job.status not in {"review", "failed"}:
+    if not job or job.user_id != user.id or job.status not in {"review", "failed", "processing"}:
         return redirect("/draws")
 
     form = await request.form()
@@ -550,7 +554,11 @@ async def import_retry_files(request: Request, db: DbDep, user: UserDep, job_id:
     if n:
         kick_import_worker()
         return redirect(f"/import/{job.id}/progress")
-    return redirect(f"/import/{job.id}/review" if job.status == "review" else "/draws")
+    if job.status == "review":
+        return redirect(f"/import/{job.id}/review")
+    if job.status == "processing":
+        return redirect(f"/import/{job.id}/progress")
+    return redirect("/draws")
 
 
 @router.post("/{job_id}/discard")
