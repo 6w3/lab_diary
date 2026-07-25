@@ -7,7 +7,9 @@ alwaysApply: true
 
 - Czech replies; English code. Only do what user asked. Never commit/push unless asked.
 - No mock lab data when extract fails — fix real pipeline.
+- **Durable prefs → write into `AGENTS.md` and/or this rule.** Keep both lean (merge outdated; no chat noise). Detail lives in `AGENTS.md`.
 - Upload-first + Smart NVIDIA default; catalog marker match when possible; custom OK otherwise.
-- Ship flow when asked: push `lab_diary` → bump `vps` submodule `services/lab_diary` → commit message `update lab diary` → push `vps` **only if** that submodule pointer is the sole change.
+- Units: group select; persist report unit; trends `to_canonical`. Bind: Smart code → LIS `[HGB]` → alias → fuzzy.
+- Ship flow when asked: push `lab_diary` → bump `vps` submodule `services/lab_diary` → commit `update lab diary` → push `vps` **only if** that submodule pointer is the sole change.
 - Multi-date: spaced Czech dates; classic table wins if it finds more dates than Smart.
-- Full detail: see `AGENTS.md` in repo root.
+- Full detail: `AGENTS.md`.

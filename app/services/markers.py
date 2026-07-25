@@ -679,6 +679,52 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
     return None
 
 
+def extract_lis_code_hint(label: str) -> str | None:
+    """Pull catalog code from LIS bracket tags like 'Hemoglobin [HGB]' or GMT."""
+    text = label or ""
+    m = re.search(r"\[([A-Za-z0-9_\-]+)\]", text)
+    token = m.group(1) if m else None
+    if not token:
+        # Standalone GMT (common CZ synonym for GGT)
+        folded = _fold(text)
+        if re.fullmatch(r"gmt", folded) or re.search(r"\bgmt\b", folded):
+            return "ggt"
+        return None
+    raw = token.strip().lower().replace("-", "_")
+    aliases = {
+        "hgb": "hgb",
+        "hb": "hgb",
+        "hct": "hct",
+        "rbc": "rbc",
+        "wbc": "wbc",
+        "plt": "plt",
+        "mcv": "mcv",
+        "mch": "mch",
+        "mchc": "mchc",
+        "rdw": "rdw",
+        "mpv": "mpv",
+        "pdw": "pdw",
+        "nrbc": "nrbc",
+        "gmt": "ggt",
+        "ggt": "ggt",
+        "alt": "alt",
+        "ast": "ast",
+        "alp": "alp",
+        "ck": "ck",
+        "ldh": "ldh",
+        "ld": "ldh",
+        "tsh": "tsh",
+        "ft4": "ft4",
+        "ft3": "ft3",
+        "psa": "psa",
+        "fpsa": "fpsa",
+        "crp": "crp",
+        "hscrp": "hs_crp",
+        "hs_crp": "hs_crp",
+    }
+    return aliases.get(raw)
+
+
 def resolve_marker(
     label: str,
     markers: list[MarkerLike],
@@ -687,15 +733,14 @@ def resolve_marker(
     user_aliases: dict[str, str] | None = None,
     allow_fuzzy: bool = True,
 ) -> MarkerLike | None:
-    """Prefer explicit catalog code, then user alias, else optional fuzzy label match.
-
-    For Smart AI extracts, pass allow_fuzzy=False so a missing/invalid model code
-    does not get overwritten by heuristic aliases (user still reviews empty bind).
-    """
+    """Prefer explicit catalog code, LIS bracket, user alias, else fuzzy label match."""
     by_code = {m.code: m for m in markers}
     hint = (code_hint or "").strip().lower() or None
     if hint and hint in by_code:
         return by_code[hint]
+    lis = extract_lis_code_hint(label)
+    if lis and lis in by_code:
+        return by_code[lis]
     if user_aliases and label:
         from app.services.label_aliases import normalize_alias_label
 

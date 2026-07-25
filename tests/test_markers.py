@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.services.label_aliases import normalize_alias_label
-from app.services.markers import MARKER_SEED, match_marker, resolve_marker
+from app.services.markers import MARKER_SEED, extract_lis_code_hint, match_marker, resolve_marker
 
 
 def _catalog():
@@ -44,9 +44,22 @@ def test_resolve_code_hint_case_insensitive():
 
 
 def test_resolve_smart_skips_fuzzy_without_code():
-    # Without Smart code, fuzzy would match; Smart path must not invent bind.
+    # Without Smart code, fuzzy would match; allow_fuzzy=False must not invent bind.
     m = resolve_marker("Hemoglobin", _catalog(), allow_fuzzy=False)
     assert m is None
+
+
+def test_lis_bracket_hgb():
+    assert extract_lis_code_hint("Hemoglobin [HGB]") == "hgb"
+    m = resolve_marker("Hemoglobin [HGB]", _catalog(), allow_fuzzy=False)
+    assert m is not None
+    assert m.code == "hgb"
+
+
+def test_fuzzy_hemoglobin():
+    m = resolve_marker("Hemoglobin", _catalog(), allow_fuzzy=True)
+    assert m is not None
+    assert m.code == "hgb"
 
 
 def test_resolve_smart_keeps_user_alias_without_fuzzy():

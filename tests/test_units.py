@@ -1,4 +1,10 @@
-from app.services.units import convert_value, to_canonical
+from app.services.ocr_parse import normalize_unit
+from app.services.units import (
+    convert_value,
+    to_canonical,
+    unit_group_for_marker,
+    unit_options_for_marker,
+)
 
 
 def test_enzyme_ukat_to_ul():
@@ -45,3 +51,48 @@ def test_calcium_mg_dl_to_mmol():
     assert ok
     assert unit == "mmol/l"
     assert abs(v - 10.0 / 4.008) < 1e-3
+
+
+def test_egfr_ml_s_to_ml_min():
+    v, ok = convert_value(1.5, "ml/s", "ml/min/1.73m2", marker_code="egfr")
+    assert ok
+    assert abs(v - 90.0) < 1e-6
+
+
+def test_fraction_to_percent():
+    v, ok = convert_value(0.462, "1", "%")
+    assert ok
+    assert abs(v - 46.2) < 1e-6
+
+
+def test_normalize_l_to_fraction():
+    assert normalize_unit("l") == "1"
+    assert normalize_unit("l/l") == "1"
+    assert normalize_unit("µkat/l") == "ukat/l"
+
+
+def test_hgb_unit_options_only_mass_group():
+    opts = unit_options_for_marker("hgb", default_unit="g/l")
+    assert "g/l" in opts
+    assert "g/dl" in opts
+    assert "ukat/l" not in opts
+    assert unit_group_for_marker("hgb") == "mass_conc_g"
+
+
+def test_alt_and_ggt_share_enzyme_group():
+    assert unit_group_for_marker("alt") == unit_group_for_marker("ggt") == "enzyme_kat"
+    opts = unit_options_for_marker("alt", default_unit="U/l")
+    assert "U/l" in opts or "u/l" in [o.lower() for o in opts]
+    assert "ukat/l" in opts
+
+
+def test_custom_gets_full_list():
+    opts = unit_options_for_marker(None)
+    assert "ukat/l" in opts
+    assert "g/l" in opts
+
+
+def test_detected_outside_group_prepended():
+    opts = unit_options_for_marker("cholesterol", default_unit="mmol/l", detected="ukat/l")
+    assert opts[0] == "ukat/l"
+    assert "mmol/l" in opts

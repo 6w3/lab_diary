@@ -28,7 +28,7 @@
             <input type="text" name="label_{{ loop.index0 }}" value="{{ r.label }}" placeholder="{{ t('source_label') }}">
           </td>
           <td>
-            <select name="marker_code_{{ loop.index0 }}">
+            <select name="marker_code_{{ loop.index0 }}" class="marker-select" data-row="{{ loop.index0 }}">
               <option value="">{{ t('custom_marker') }}</option>
               {% for m in markers %}
                 <option value="{{ m.code }}" {% if m.code == r.marker_code %}selected{% endif %}>
@@ -39,7 +39,7 @@
           </td>
           <td><input type="number" step="any" name="value_{{ loop.index0 }}" value="{{ r.value }}"></td>
           <td>
-            <select name="unit_{{ loop.index0 }}">
+            <select name="unit_{{ loop.index0 }}" class="unit-select" data-row="{{ loop.index0 }}">
               {% for u in r.unit_options %}
                 <option value="{{ u }}" {% if u == r.unit %}selected{% endif %}>{{ u }}</option>
               {% endfor %}
@@ -78,7 +78,7 @@
       <input type="text" name="label___IDX__" value="" placeholder="{{ t('source_label') }}">
     </td>
     <td>
-      <select name="marker_code___IDX__">
+      <select name="marker_code___IDX__" class="marker-select" data-row="__IDX__">
         <option value="">{{ t('custom_marker') }}</option>
         {% for m in markers %}
           <option value="{{ m.code }}">{{ m.name_cs if locale == 'cs' else m.name_en }} ({{ m.default_unit }})</option>
@@ -87,7 +87,7 @@
     </td>
     <td><input type="number" step="any" name="value___IDX__" value=""></td>
     <td>
-      <select name="unit___IDX__">
+      <select name="unit___IDX__" class="unit-select" data-row="__IDX__">
         {% for u in unit_choices %}
           <option value="{{ u }}">{{ u }}</option>
         {% endfor %}
@@ -104,10 +104,51 @@
 </template>
 <script>
 (function () {
+  const markerUnits = {{ marker_units_json | safe }};
+  const allUnits = {{ unit_choices_json | safe }};
   const btn = document.getElementById('add-row-btn');
   const body = document.getElementById('review-body');
   const countEl = document.getElementById('row-count');
   const tpl = document.getElementById('empty-row');
+
+  function fillUnitSelect(sel, units, keep) {
+    if (!sel) return;
+    const current = keep || sel.value;
+    sel.innerHTML = '';
+    const list = units && units.length ? units : allUnits;
+    list.forEach(function (u) {
+      const opt = document.createElement('option');
+      opt.value = u;
+      opt.textContent = u;
+      if (u === current) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (current && !list.includes(current)) {
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = current;
+      opt.selected = true;
+      sel.insertBefore(opt, sel.firstChild);
+    }
+  }
+
+  function onMarkerChange(markerSel) {
+    const row = markerSel.getAttribute('data-row');
+    const unitSel = body.querySelector('.unit-select[data-row="' + row + '"]');
+    const code = markerSel.value;
+    const units = code ? (markerUnits[code] || allUnits) : allUnits;
+    fillUnitSelect(unitSel, units, unitSel ? unitSel.value : '');
+  }
+
+  if (body) {
+    body.addEventListener('change', function (e) {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('marker-select')) {
+        onMarkerChange(t);
+      }
+    });
+  }
+
   if (!btn || !body || !countEl || !tpl) return;
   btn.addEventListener('click', function () {
     const idx = parseInt(countEl.value, 10) || 0;

@@ -32,7 +32,7 @@ from app.services.result_bind import bind_marker_and_units
 from app.services.smart_extract import smart_enabled
 from app.i18n import t
 from app.services.storage import delete_file, save_import_upload
-from app.services.units import UNIT_CHOICES
+from app.services.units import UNIT_CHOICES, marker_unit_options_map
 
 router = APIRouter(prefix="/import", tags=["import"])
 templates = Jinja2Templates(directory="app/templates")
@@ -355,6 +355,8 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             groups=groups,
             lab_name=lab_name,
             unit_choices=UNIT_CHOICES,
+            unit_choices_json=json.dumps(UNIT_CHOICES, ensure_ascii=False),
+            marker_units_json=json.dumps(marker_unit_options_map(), ensure_ascii=False),
             markers=catalog,
             detected_dates=detected_dates,
             multi_date=multi_date,

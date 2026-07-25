@@ -6,7 +6,6 @@ from app.models import CustomMarker, Marker
 from app.services.label_aliases import learn_label_alias, load_user_aliases
 from app.services.markers import resolve_marker
 from app.services.ocr_parse import normalize_unit
-from app.services.units import to_canonical
 
 
 def bind_marker_and_units(
@@ -25,6 +24,9 @@ def bind_marker_and_units(
 ) -> tuple[str | None, int | None, str | None, float, str, float | None, float | None]:
     """Return marker_code, custom_id, label, value, unit, lab_low, lab_high.
 
+    Stores report/review units as chosen (no forced canonical conversion).
+    Trends convert to marker default_unit when plotting.
+
     When allow_fuzzy is False and code_hint is empty, force custom marker
     (user explicitly chose \"custom\" in the review select).
     """
@@ -38,24 +40,12 @@ def bind_marker_and_units(
 
     unit_n = normalize_unit(unit or "")
     if matched:
-        nv, nu, ok = to_canonical(value, unit_n or unit, matched.code, matched.default_unit)
-        if not ok:
-            nv, nu = value, unit_n or matched.default_unit
-        low_out, high_out = lab_low, lab_high
-        src_unit = unit_n or unit
-        if lab_low is not None:
-            lv, _, lok = to_canonical(lab_low, src_unit, matched.code, matched.default_unit)
-            if lok:
-                low_out = lv
-        if lab_high is not None:
-            hv, _, hok = to_canonical(lab_high, src_unit, matched.code, matched.default_unit)
-            if hok:
-                high_out = hv
-        if not nu:
-            nu = matched.default_unit
+        if not unit_n:
+            unit_n = matched.default_unit
         if learn_alias and label:
             learn_label_alias(db, user_id, label, matched.code, catalog)
-        return matched.code, None, matched.name_cs, nv, nu, low_out, high_out
+        # Keep value + refs in the same unit the user confirmed (no silent rescale).
+        return matched.code, None, matched.name_cs, value, unit_n, lab_low, lab_high
 
     custom_id = None
     if label:

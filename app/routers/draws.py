@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ from app.services.ocr_tables import date_to_datetime, parse_iso_date
 from app.services.result_bind import bind_marker_and_units
 from app.services.smart_extract import smart_enabled
 from app.services.storage import delete_file
-from app.services.units import UNIT_CHOICES, unit_options_for_marker
+from app.services.units import UNIT_CHOICES, marker_unit_options_map, unit_options_for_marker
 
 router = APIRouter(prefix="/draws", tags=["draws"])
 templates = Jinja2Templates(directory="app/templates")
@@ -371,10 +372,10 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
         if r.confirmed or r.attachment_id != att.id:
             continue
         unit_opts = unit_options_for_marker(
-            r.marker.default_unit if r.marker else (r.unit or "")
+            r.marker_code if r.marker else None,
+            default_unit=r.marker.default_unit if r.marker else (r.unit or ""),
+            detected=r.unit or None,
         )
-        if r.unit and r.unit not in unit_opts:
-            unit_opts = [r.unit] + unit_opts
         proposals.append(
             {
                 "label": r.label or "",
@@ -403,6 +404,8 @@ def ocr_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, dr
             multi_date=multi_date,
             detected_dates=unique_drawn_dates(proposals),
             unit_choices=UNIT_CHOICES,
+            unit_choices_json=json.dumps(UNIT_CHOICES, ensure_ascii=False),
+            marker_units_json=json.dumps(marker_unit_options_map(), ensure_ascii=False),
             markers=catalog,
             default_date=draw.drawn_at.strftime("%Y-%m-%d") if draw.drawn_at else "",
         ),

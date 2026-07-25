@@ -81,9 +81,11 @@ def enrich_proposals(
         if matched and not unit:
             unit = matched.default_unit
         drawn = _proposal_dt(p.get("proposed_drawn_on"))
-        unit_opts = unit_options_for_marker(matched.default_unit if matched else unit)
-        if unit and unit not in unit_opts:
-            unit_opts = [unit] + unit_opts
+        unit_opts = unit_options_for_marker(
+            matched.code if matched else None,
+            default_unit=matched.default_unit if matched else None,
+            detected=unit or None,
+        )
         out.append(
             {
                 "marker_code": matched.code if matched else "",
@@ -112,13 +114,12 @@ def finalize_job(db: Session, job: ImportJob) -> None:
         all_proposals,
         key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
     )
-    # Smart AI owns marker mapping; do not let OCR heuristics override missing codes.
-    allow_fuzzy = (job.extract_mode or "").lower() != "smart"
+    # Smart code wins when present; LIS brackets + fuzzy fill gaps (avoids custom flood).
     enriched = enrich_proposals(
         all_proposals,
         catalog,
         user_aliases=user_aliases,
-        allow_fuzzy=allow_fuzzy,
+        allow_fuzzy=True,
     )
     enriched = filter_proposals(enriched)
     detected_dates = unique_drawn_dates(enriched)

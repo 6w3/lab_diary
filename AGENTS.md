@@ -2,9 +2,17 @@
 
 Personal lab diary app (`lab.behejsrdcem.cz`). Repo: `git@github.com:6w3/lab_diary.git`.
 
+## Maintain these docs
+
+When the user gives **durable** process/product instructions (deploy, scope, units, Smart, language, …), write them here and/or in `.cursor/rules/`.
+
+- Prefer **AGENTS.md** for detail; keep `.cursor/rules/*.mdc` short (essentials + pointer here).
+- **Keep files lean**: merge/update outdated bullets; do not stack duplicates or one-off chat noise.
+- Include this maintenance rule itself whenever relevant long-term prefs are added.
+
 ## Language & scope
 
-- Reply to the user in **Czech**; write code/comments/commit messages in **English**.
+- Reply in **Czech**; code/comments/commits in **English**.
 - Do **only** what was asked. No drive-by refactors, no extra docs unless requested.
 - Fix **root causes**, not symptoms.
 - **Never commit or push** unless the user explicitly asks.
@@ -17,8 +25,15 @@ Personal lab diary app (`lab.behejsrdcem.cz`). Repo: `git@github.com:6w3/lab_dia
 - Smart must categorize markers against catalog when possible; unknown → custom marker still OK.
 - Review: edit rows, **add row**, multi-draw dates, prefill **lab_name** from report when detected.
 - Trends: all markers with data + tip/lab refs on one page, grouped/sorted.
-- Units: fixed catalog + convert to marker `default_unit` when conversion exists.
 - Smart provider = **NVIDIA NIM only** (no paid Gemini/etc. unless user asks).
+
+## Units & marker bind
+
+- Quantity groups: `UNIT_GROUPS` + `MARKER_UNIT_GROUP` in `app/services/units.py`. Review unit select = **that group only** (custom → full `UNIT_CHOICES`). Detected unit outside group stays as extra option (no silent rewrite).
+- **Persist** report/review unit (normalize string only). Do **not** force `to_canonical` on confirm.
+- **Trends** / compare: `to_canonical` → marker `default_unit`.
+- Fraction (HCT/RDW): `l`/`l/l` → unit `1`; group `["%", "1"]`; value unchanged on unit normalize.
+- Bind priority: valid Smart `marker_code` → LIS brackets (`[HGB]`, …) / `GMT`→`ggt` → user alias → fuzzy. Smart gaps use fuzzy (no custom flood).
 
 ## Stack (short)
 
@@ -45,6 +60,7 @@ Czech hospital comparison tables often use spaced dates (`14. 10. 2020 10:30`). 
 Upload is **import-first** (`/import`): one batch can create/extend multiple draws. Never silent-merge by day+lab — review asks merge vs new draw. Files link via `draw_attachments` M2M. Dedup identical results on confirm. Conditions wizard after confirm (create new / edit existing). Split selected results on draw detail if merged by mistake.
 
 Smart extract:
+
 - Schema examples must stay **placeholders** (never real ferritin/0.0 examples — VLMs copy them).
 - Date discovery must classify `single` vs `multi_column`; never force consecutive calendar-day spam.
 - Discard / retry when output looks hallucinated (one marker, many dates, all zeros); fall back to classic.
@@ -53,4 +69,4 @@ Smart extract:
 ## Marker catalog
 
 Extend `MARKER_SEED` + `MARKER_ALIASES` for standard Czech lab abbreviations (e.g. `Barvivo erytr. MCH` → `mch`).
-**Smart AI is the primary marker mapper** (Czech labels → catalog `marker_code`). Backend trusts a valid Smart `marker_code`; for Smart jobs it does **not** fuzzy-override missing codes (user aliases still apply). Classic OCR still uses fuzzy aliases.
+**Smart AI is the primary marker mapper** (Czech labels → catalog `marker_code`). Backend trusts a valid Smart code; LIS brackets + fuzzy fill gaps (see Units & marker bind).

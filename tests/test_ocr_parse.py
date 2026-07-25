@@ -17,11 +17,11 @@ TSH 2.1 mIU/l 0.4-4.0
 
 
 def test_normalize_unit_micro_and_pkat_typo():
-    assert normalize_unit("μkat/L") == "ukat/L"
+    assert normalize_unit("μkat/L") == "ukat/l"
     assert normalize_unit("µkat/l") == "ukat/l"
-    assert normalize_unit("pkat/L") == "ukat/L"
+    assert normalize_unit("pkat/L") == "ukat/l"
     assert normalize_unit("pkat") == "ukat"
-    assert normalize_unit("mmol/L") == "mmol/L"
+    assert normalize_unit("mmol/L") == "mmol/l"
 
 
 def test_parse_ocr_lines_micro_unit():

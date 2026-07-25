@@ -15,16 +15,55 @@ _LINE_RE = re.compile(
 
 
 def normalize_unit(unit: str) -> str:
-    """Normalize OCR units: Greek/micro signs → u; common μkat→pkat OCR typo."""
+    """Normalize OCR/report units to catalog spellings (value unchanged)."""
     if not unit:
         return ""
     u = unit.strip()
     u = u.replace("μ", "u").replace("µ", "u").replace("Μ", "u")
     u = u.replace("μkat", "ukat").replace("µkat", "ukat")
-    lower = u.lower()
-    if lower in {"pkat", "pkat/l", "pkat/L"} or lower.startswith("pkat"):
-        u = "u" + u[1:]
-    return u
+    u = u.replace("¹⁰", "10").replace("⁹", "9").replace("¹²", "12")
+    u = u.replace("×", "x").replace("⋅", ".")
+    compact = u.lower().replace(" ", "")
+    if compact in {"pkat", "pkat/l"} or compact.startswith("pkat"):
+        compact = "u" + compact[1:]
+
+    aliases = {
+        "g/l": "g/l",
+        "g/dl": "g/dl",
+        "ukat/l": "ukat/l",
+        "ukat": "ukat",
+        "u/l": "U/l",
+        "iu/l": "IU/l",
+        "iu/ml": "IU/ml",
+        "miu/l": "mIU/l",
+        "mmol/l": "mmol/l",
+        "umol/l": "umol/l",
+        "mg/dl": "mg/dl",
+        "ug/l": "ug/l",
+        "ug/dl": "ug/dl",
+        "ng/ml": "ng/ml",
+        "ng/l": "ng/l",
+        "10^9/l": "10^9/l",
+        "10e9/l": "10^9/l",
+        "x10^9/l": "10^9/l",
+        "10*9/l": "10^9/l",
+        "10^12/l": "10^12/l",
+        "10e12/l": "10^12/l",
+        "x10^12/l": "10^12/l",
+        "l/l": "1",
+        "ll": "1",
+        "l": "1",
+        "ratio": "1",
+        "ml/min/1.73m2": "ml/min/1.73m2",
+        "ml/min/1,73m2": "ml/min/1.73m2",
+        "ml/s": "ml/s",
+        "mm/h": "mm/h",
+        "mm/hod": "mm/h",
+        "%hba1c": "%HbA1c",
+    }
+    if compact in aliases:
+        return aliases[compact]
+    return compact
 
 
 def _row_from_match(match: re.Match[str]) -> dict[str, Any] | None:

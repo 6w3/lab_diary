@@ -64,6 +64,7 @@ Rules:
   - Never invent codes outside the catalog. Never guess a wrong close code (ALT≠AST, CRP≠hs_crp, neutrophils≠neutrophils_abs).
   - Use unit + label to choose % vs absolute (e.g. Neutrofily % → neutrophils; Neutrofily abs. počet / 10^9/l → neutrophils_abs).
   - Keep label exactly as printed on the report (Czech spelling OK).
+- Units (CRITICAL): copy the unit string printed next to the value (µkat/l, U/l, mmol/l, g/l, 10^9/l, %, ml/min/1.73m2, …). Do not invent units. Do not put enzyme units on lipids or counts.
 - Keep original units from the report; do not invent conversions.
 - Extract EVERY visible lab analyte row (biochemistry + hematology), not just one marker.
 """
