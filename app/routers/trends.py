@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from app.deps import DbDep, LocaleDep, UserDep, template_context
 from app.models import BloodDraw, CustomMarker, Marker, ResultValue
 from app.services.markers import MARKER_CATEGORY_LABELS, marker_category, marker_sort_key
-from app.services.trend_points import collapse_points_per_draw
+from app.services.trend_points import collapse_points_per_draw, day_average_points
 from app.services.units import format_unit, to_canonical
 
 router = APIRouter(tags=["trends"])
@@ -137,8 +137,11 @@ def trends(
         tip_low = meta.get("tip_low")
         tip_high = meta.get("tip_high")
         points = collapse_points_per_draw(points, tip_low, tip_high)
+        avg_points = day_average_points(points)
         labels = [p["date"] for p in points]
         values = [p["value"] for p in points]
+        avg_labels = [p["date"] for p in avg_points]
+        avg_values = [p["value"] for p in avg_points]
         lab_lows = [p.get("lab_low") for p in points]
         lab_highs = [p.get("lab_high") for p in points]
         unit = points[-1]["unit"] or meta.get("unit") or ""
@@ -152,6 +155,8 @@ def trends(
                 "category_label": meta["category_label"],
                 "labels": labels,
                 "values": values,
+                "avg_labels": avg_labels,
+                "avg_values": avg_values,
                 "points": points,
                 "lab_lows": lab_lows,
                 "lab_highs": lab_highs,

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from app.models import Attachment, ImportJob, Marker
 from app.services.label_aliases import load_user_aliases
 from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
-from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import parse_iso_date
 from app.services.smart_extract import run_smart_extract
@@ -42,22 +41,17 @@ def extract_file(
     *,
     user_hint: str | None = None,
 ) -> tuple[str, list[dict], dict]:
-    if mode == "smart":
-        try:
-            raw, proposals, meta = run_smart_extract(
-                storage_path,
-                marker_hints=marker_hints,
-                user_hint=user_hint,
-            )
-            proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
-            meta = {**(meta or {}), **merge_meta}
-            return raw, proposals, meta
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Smart extract failed; falling back to classic: %s", exc)
-            raw, proposals, meta = extract_document(storage_path)
-            meta = {**(meta or {}), "engine": meta.get("engine") or "classic", "smart_error": str(exc)[:300]}
-            return raw, proposals, meta
-    return extract_document(storage_path)
+    """Extract lab results. Smart-only — never falls back to classic OCR."""
+    if (mode or "smart").lower() != "smart":
+        raise RuntimeError("Classic OCR is disabled; use Smart AI extract")
+    raw, proposals, meta = run_smart_extract(
+        storage_path,
+        marker_hints=marker_hints,
+        user_hint=user_hint,
+    )
+    proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
+    meta = {**(meta or {}), **merge_meta}
+    return raw, proposals, meta
 
 
 def _proposal_dt(raw: str | None) -> str:

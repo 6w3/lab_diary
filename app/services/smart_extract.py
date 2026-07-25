@@ -15,6 +15,7 @@ import httpx
 from PIL import Image
 
 from app.config import get_settings
+from app.services.draw_match import fingerprints_nearly_identical, value_fingerprint
 from app.services.proposal_filter import filter_proposals, is_junk_label
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ Rules:
 - Prefer the sample collection date ("Datum odběru") over visit/print timestamps.
 - If this is a SINGLE visit / single result list (typical EHR screen), emit ONE draws[] object with ALL visible numeric lab rows.
 - If a comparison table has several DATE COLUMNS in the header, emit one draws[] entry PER date column. Put each marker's value from that column into that draw. Do NOT collapse columns into a single draw.
+- CRITICAL multi_column: values MUST differ across date columns when the printed numbers differ. NEVER copy the same column's numbers onto every date. Each draws[].results must come from THAT column only.
 - Czech dates are day-first: D.M.YYYY or DD.MM.YYYY (12.01.2025 = 2025-01-12). Spaces after dots are common ("14. 10. 2020").
 - Prefer ISO dates YYYY-MM-DD in output.
 - Numbers as JSON numbers (dot decimal). Values like ">1.50" → 1.50 and note in warnings if needed.
@@ -305,6 +307,59 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
                 }
             )
     return {"draws": draws_out, "warnings": list(data.get("warnings") or [])}
+
+
+def _draw_result_fingerprint(draw: dict[str, Any]) -> frozenset[tuple[str, float]]:
+    return value_fingerprint(draw.get("results") or [])
+
+
+def multi_column_draws_are_cloned(draws: list[dict[str, Any]]) -> bool:
+    """True when ≥2 date draws share nearly identical marker/value fingerprints."""
+    fps: list[frozenset[tuple[str, float]]] = []
+    for d in draws:
+        fp = _draw_result_fingerprint(d)
+        if len(fp) >= 3:
+            fps.append(fp)
+    if len(fps) < 2:
+        return False
+    for i in range(len(fps)):
+        for j in range(i + 1, len(fps)):
+            if fingerprints_nearly_identical(fps[i], fps[j]):
+                return True
+    return False
+
+
+def drop_cloned_multi_column_draws(parsed: dict[str, Any]) -> dict[str, Any]:
+    """Keep one draw per unique fingerprint; prefer newest drawn_on when dropping clones."""
+    draws = list(parsed.get("draws") or [])
+    if len(draws) < 2 or not multi_column_draws_are_cloned(draws):
+        return parsed
+    kept: list[dict[str, Any]] = []
+    seen_fps: list[frozenset[tuple[str, float]]] = []
+    # Newest first so we keep the most recent column when fingerprints collide.
+    ordered = sorted(draws, key=lambda d: str(d.get("drawn_on") or ""), reverse=True)
+    warnings = list(parsed.get("warnings") or [])
+    dropped = 0
+    for d in ordered:
+        fp = _draw_result_fingerprint(d)
+        if len(fp) >= 3 and any(fingerprints_nearly_identical(fp, prev) for prev in seen_fps):
+            dropped += 1
+            continue
+        kept.append(d)
+        if fp:
+            seen_fps.append(fp)
+    if dropped:
+        warnings.append(f"dropped_{dropped}_cloned_multi_column_draws")
+    # Restore chronological order
+    kept.sort(key=lambda d: str(d.get("drawn_on") or ""))
+    return {"draws": kept, "warnings": warnings}
+
+
+CLONE_COLUMN_HINT = (
+    "CRITICAL FIX: Your previous answer copied the SAME numbers onto multiple date columns. "
+    "This is a multi-column history table — each date column has DIFFERENT values. "
+    "Re-read each column separately. Do NOT duplicate one column across dates."
+)
 
 
 def _is_consecutive_day_run(dates: list[str], *, min_len: int = 5) -> bool:
@@ -746,8 +801,7 @@ def run_smart_extract(
                         text, proposals, parsed = text_fix, props_fix, parsed_fix
                         got_dates = got_fix
                     else:
-                        # Keep hallucinated pair out of review — prefer empty → classic fallback
-                        # or single newest date from discovery if extract still collapsed.
+                        # Keep hallucinated pair out of review — prefer single newest date
                         keep = discovered2[0]
                         filtered = [p for p in props_fix if p.get("proposed_drawn_on") == keep]
                         if filtered:
@@ -837,6 +891,42 @@ def run_smart_extract(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Smart multi-date retry failed: %s", exc)
 
+        # Cloned multi-column columns (same values on every date) → retry once, then drop clones
+        if multi_column_draws_are_cloned(parsed.get("draws") or []):
+            logger.warning(
+                "Smart multi-column draws look cloned; retrying with column-diff hint"
+            )
+            try:
+                content_clone = _build_extract_content(
+                    pages,
+                    marker_hints=marker_hints,
+                    layout="multi_column" if layout != "single" else layout,
+                    discovered=discovered or got_dates,
+                    user_hint=user_hint,
+                )
+                content_clone.insert(1, {"type": "text", "text": CLONE_COLUMN_HINT})
+                text_c = _nvidia_chat(content_clone, max_tokens=8192)
+                parsed_c = _validate_smart_payload(_extract_json(text_c))
+                if not multi_column_draws_are_cloned(parsed_c.get("draws") or []):
+                    text, proposals, parsed = text_c, _flatten_draws(parsed_c), parsed_c
+                    got_dates = sorted(
+                        {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
+                    )
+                else:
+                    parsed = drop_cloned_multi_column_draws(parsed_c)
+                    proposals = _flatten_draws(parsed)
+                    got_dates = sorted(
+                        {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
+                    )
+                    text = text_c
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Smart clone-column retry failed: %s", exc)
+                parsed = drop_cloned_multi_column_draws(parsed)
+                proposals = _flatten_draws(parsed)
+                got_dates = sorted(
+                    {p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")}
+                )
+
         # Hallucination guard: one marker / zero values / date spam → single-draw retry
         if looks_like_hallucinated_extract(proposals):
             logger.warning(
@@ -875,9 +965,9 @@ def run_smart_extract(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Smart single-draw retry failed: %s", exc)
 
-        # Still garbage → return empty rather than ferritin spam (classic fallback can take over)
+        # Still garbage → empty (caller must not fall back to classic OCR)
         if looks_like_hallucinated_extract(proposals):
-            logger.error("Smart extract still hallucinated; returning empty for classic fallback")
+            logger.error("Smart extract still hallucinated; returning empty")
             proposals = []
             parsed = {"draws": [], "warnings": ["hallucinated_extract_discarded"]}
             got_dates = []

@@ -136,3 +136,44 @@ def test_scrape_iso_dates_czech_and_iso():
     assert "2020-10-14" in dates
     assert "2016-05-18" in dates
     assert "2010-09-14" in dates
+
+
+def test_multi_column_clone_detect_and_drop():
+    from app.services.smart_extract import (
+        drop_cloned_multi_column_draws,
+        multi_column_draws_are_cloned,
+    )
+
+    same_results = [
+        {"marker_code": "glucose", "label": "S_GLU", "value": 5.4, "unit": "mmol/l"},
+        {"marker_code": "urea", "label": "S_UREA", "value": 4.3, "unit": "mmol/l"},
+        {"marker_code": "creatinine", "label": "S_KREA", "value": 89.0, "unit": "umol/l"},
+        {"marker_code": "alt", "label": "S_ALT", "value": 0.41, "unit": "ukat/l"},
+    ]
+    different = [
+        {"marker_code": "glucose", "label": "S_GLU", "value": 4.8, "unit": "mmol/l"},
+        {"marker_code": "urea", "label": "S_UREA", "value": 4.9, "unit": "mmol/l"},
+        {"marker_code": "creatinine", "label": "S_KREA", "value": 86.0, "unit": "umol/l"},
+        {"marker_code": "alt", "label": "S_ALT", "value": 0.48, "unit": "ukat/l"},
+    ]
+    cloned = {
+        "draws": [
+            {"drawn_on": "2008-12-30", "results": same_results},
+            {"drawn_on": "2010-09-14", "results": same_results},
+        ],
+        "warnings": [],
+    }
+    assert multi_column_draws_are_cloned(cloned["draws"])
+    cleaned = drop_cloned_multi_column_draws(cloned)
+    assert len(cleaned["draws"]) == 1
+    assert cleaned["draws"][0]["drawn_on"] == "2010-09-14"
+
+    ok = {
+        "draws": [
+            {"drawn_on": "2008-12-30", "results": same_results},
+            {"drawn_on": "2010-09-14", "results": different},
+        ],
+        "warnings": [],
+    }
+    assert not multi_column_draws_are_cloned(ok["draws"])
+    assert len(drop_cloned_multi_column_draws(ok)["draws"]) == 2

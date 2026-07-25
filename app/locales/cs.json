@@ -152,6 +152,7 @@
   "extract_classic": "Classic (na serveru, zdarma) — jen čtení textu bez AI, nutná ruční úprava",
   "extract_smart": "Smart AI (NVIDIA — rozumí fotkám/tabulkám) — Doporučeno",
   "smart_consent": "Souhlasím s odesláním reportu na NVIDIA NIM k analýze",
+  "smart_unavailable": "Smart AI teď není dostupná. Zkus to později.",
   "multi_date_hint": "Detekováno více dat odběru. Po potvrzení se vytvoří samostatné odběry podle data.",
   "detected_dates": "Nalezená data",
   "single_date_hint": "Datum odběru",

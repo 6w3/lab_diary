@@ -186,26 +186,46 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
   const c = byKey[el.dataset.key];
   if (!c) return;
   const rawDates = c.labels || (c.points || []).map((p) => p.date);
-  const times = rawDates.map(parseDay);
-  if (times.some((t) => !t)) return;
+  const pointTimes = rawDates.map(parseDay);
+  if (pointTimes.some((t) => !t)) return;
+  const avgDates = c.avg_labels || [];
+  const avgVals = c.avg_values || [];
+  const avgTimes = avgDates.map(parseDay);
+  const allTimes = pointTimes.concat(avgTimes.filter(Boolean)).sort((a, b) => a - b);
 
   // Chart.js time scale + parsing:false needs numeric timestamps, not Date
   // objects — Date x-values make the axis fall back to "now" and hide points.
-  const xy = (ys) => times.map((t, i) => ({ x: t.getTime(), y: ys[i] }));
+  const pointXy = pointTimes.map((t, i) => ({ x: t.getTime(), y: c.values[i] }));
+  const avgXy = avgTimes.map((t, i) => ({ x: t.getTime(), y: avgVals[i] }));
   // Tip lines span full time range (not only sample index slots).
   const tipSpan = (y) => [
-    { x: times[0].getTime(), y },
-    { x: times[times.length - 1].getTime(), y },
+    { x: allTimes[0].getTime(), y },
+    { x: allTimes[allTimes.length - 1].getTime(), y },
   ];
+  const labXy = (arr) => pointTimes.map((t, i) => ({ x: t.getTime(), y: arr[i] }));
 
-  const datasets = [{
-    label: c.name,
-    data: xy(c.values),
-    borderColor: '#1f5c4a',
-    backgroundColor: 'rgba(31,92,74,0.15)',
-    tension: 0.2,
-    pointRadius: 3,
-  }];
+  // Trend line = day average; dots = every measurement (incl. same-day duals).
+  const datasets = [
+    {
+      label: c.name + ' trend',
+      data: avgXy.length ? avgXy : pointXy,
+      borderColor: '#1f5c4a',
+      backgroundColor: 'rgba(31,92,74,0.12)',
+      tension: 0.2,
+      pointRadius: 0,
+      fill: false,
+      order: 2,
+    },
+    {
+      label: c.name,
+      data: pointXy,
+      borderColor: '#1f5c4a',
+      backgroundColor: '#1f5c4a',
+      showLine: false,
+      pointRadius: 4,
+      order: 1,
+    },
+  ];
   if (c.tip_low != null || c.tip_high != null) {
     if (c.tip_low != null) {
       datasets.push({
@@ -234,7 +254,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
   if (hasLab) {
     datasets.push({
       label: 'lab low',
-      data: xy(labLows),
+      data: labXy(labLows),
       borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
@@ -245,7 +265,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     });
     datasets.push({
       label: 'lab high',
-      data: xy(labHighs),
+      data: labXy(labHighs),
       borderColor: 'rgba(236,87,79,0.55)',
       borderDash: [2, 3],
       pointRadius: 0,
@@ -255,7 +275,7 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
     });
   }
 
-  const spanMs = times[times.length - 1] - times[0];
+  const spanMs = allTimes[allTimes.length - 1] - allTimes[0];
   const dayMs = 86400000;
   let timeUnit = 'day';
   if (spanMs > 900 * dayMs) timeUnit = 'year';
@@ -270,9 +290,9 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
       plugins: {
         legend: { display: false },
         tooltip: {
-          mode: 'index',
-          intersect: false,
-          filter: (item) => item.datasetIndex === 0,
+          mode: 'nearest',
+          intersect: true,
+          filter: (item) => item.dataset.label === c.name,
           callbacks: {
             title(items) {
               if (!items.length) return '';
@@ -284,13 +304,24 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
             },
             afterBody(items) {
               if (!items.length) return [];
-              const idx = items[0].dataIndex;
-              const point = (c.points || [])[idx];
+              const x = items[0].parsed.x;
+              const y = items[0].parsed.y;
+              const point = (c.points || []).find((p) => {
+                const t = parseDay(p.date);
+                return t && t.getTime() === x && p.value === y;
+              }) || (c.points || []).find((p) => {
+                const t = parseDay(p.date);
+                return t && t.getTime() === x;
+              });
               const lines = formatConditions(point);
               if (point && (point.lab_low != null || point.lab_high != null)) {
                 const lo = point.lab_low != null ? point.lab_low : '—';
                 const hi = point.lab_high != null ? point.lab_high : '—';
                 lines.push('{{ t("lab_ref")|e }}: ' + lo + '–' + hi);
+              }
+              const sameDay = (c.points || []).filter((p) => p.date === (point && point.date));
+              if (sameDay.length > 1) {
+                lines.push('n=' + sameDay.length + ' (průměr v křivce)');
               }
               return lines;
             }

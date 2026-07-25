@@ -1,4 +1,4 @@
-"""Collapse duplicate result rows into one chart point per blood draw."""
+"""Collapse duplicate result rows; build chart series with day averages."""
 
 from __future__ import annotations
 
@@ -62,4 +62,30 @@ def collapse_points_per_draw(points: list[dict], tip_low, tip_high) -> list[dict
         ]
         out.append((preferred or group)[-1])
     out.sort(key=lambda p: (p.get("date") or "", p.get("draw_id") or 0))
+    return out
+
+
+def day_average_points(points: list[dict]) -> list[dict]:
+    """One point per calendar day = mean of values that day (for trend line)."""
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    for p in points:
+        day = (p.get("date") or "")[:10]
+        if not day:
+            continue
+        by_day[day].append(p)
+    out: list[dict] = []
+    for day in sorted(by_day):
+        group = by_day[day]
+        vals = [float(p["value"]) for p in group if p.get("value") is not None]
+        if not vals:
+            continue
+        avg = sum(vals) / len(vals)
+        base = dict(group[-1])
+        base["value"] = avg
+        base["date"] = day
+        base["is_day_average"] = True
+        base["source_count"] = len(vals)
+        # Prefer lab refs from last point; clear draw_id so it is not a measurement
+        base["draw_id"] = None
+        out.append(base)
     return out

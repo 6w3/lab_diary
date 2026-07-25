@@ -67,27 +67,95 @@ def test_find_candidates_same_day_lab():
             id=1,
             user_id=1,
             lab_name="ON Příbram",
-            drawn_at=datetime(2024, 6, 7),
+            drawn_at=datetime(2024, 6, 7, 8, 0),
             results=[],
         ),
         SimpleNamespace(
             id=2,
             user_id=1,
             lab_name="Other Lab",
-            drawn_at=datetime(2024, 6, 7),
+            drawn_at=datetime(2024, 6, 7, 8, 0),
             results=[],
         ),
         SimpleNamespace(
             id=3,
             user_id=1,
             lab_name="ON Příbram",
-            drawn_at=datetime(2024, 6, 8),
+            drawn_at=datetime(2024, 6, 8, 8, 0),
             results=[],
         ),
     ]
     db = _FakeDB(draws=draws)
     found = find_draw_candidates(db, 1, date(2024, 6, 7), "on příbram")
     assert [d.id for d in found] == [1]
+
+
+def test_find_candidates_same_report_different_lab():
+    results = [
+        SimpleNamespace(confirmed=True, marker_code="glucose", label="Glukóza", value=4.8),
+        SimpleNamespace(confirmed=True, marker_code="urea", label="Urea", value=4.9),
+        SimpleNamespace(confirmed=True, marker_code="creatinine", label="Kreatinin", value=86.0),
+        SimpleNamespace(confirmed=True, marker_code="alt", label="ALT", value=0.48),
+    ]
+    draws = [
+        SimpleNamespace(
+            id=10,
+            user_id=1,
+            lab_name="Oblastní nemocnice Příbram, a.s.",
+            drawn_at=datetime(2010, 9, 14, 7, 30),
+            results=results,
+        ),
+    ]
+    db = _FakeDB(draws=draws)
+    proposals = [
+        {"marker_code": "glucose", "label": "Glukóza", "value": 4.8},
+        {"marker_code": "urea", "label": "Urea", "value": 4.9},
+        {"marker_code": "creatinine", "label": "Kreatinin", "value": 86.0},
+        {"marker_code": "alt", "label": "ALT", "value": 0.48},
+    ]
+    found = find_draw_candidates(
+        db,
+        1,
+        date(2010, 9, 14),
+        "Oblastní OKB Přibram a. s.",
+        drawn_at=datetime(2010, 9, 14, 7, 30),
+        proposal_rows=proposals,
+    )
+    assert [d.id for d in found] == [10]
+
+
+def test_find_candidates_skips_hema_vs_biochem():
+    hema = [
+        SimpleNamespace(confirmed=True, marker_code="wbc", label="Leukocyty", value=7.7),
+        SimpleNamespace(confirmed=True, marker_code="rbc", label="Erytrocyty", value=5.01),
+        SimpleNamespace(confirmed=True, marker_code="hgb", label="Hemoglobin", value=152.0),
+        SimpleNamespace(confirmed=True, marker_code="plt", label="Trombocyty", value=220.0),
+    ]
+    draws = [
+        SimpleNamespace(
+            id=11,
+            user_id=1,
+            lab_name="Hematologie",
+            drawn_at=datetime(2008, 12, 30, 7, 30),
+            results=hema,
+        ),
+    ]
+    db = _FakeDB(draws=draws)
+    biochem = [
+        {"marker_code": "glucose", "label": "Glukóza", "value": 5.4},
+        {"marker_code": "urea", "label": "Urea", "value": 4.3},
+        {"marker_code": "creatinine", "label": "Kreatinin", "value": 89.0},
+        {"marker_code": "alt", "label": "ALT", "value": 0.41},
+    ]
+    found = find_draw_candidates(
+        db,
+        1,
+        date(2008, 12, 30),
+        "Klin. biochemie",
+        drawn_at=datetime(2008, 12, 30, 7, 30),
+        proposal_rows=biochem,
+    )
+    assert found == []
 
 
 def test_resolve_creates_new_by_default():

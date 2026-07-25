@@ -61,28 +61,67 @@ def _build_groups(
     proposals: list[dict],
     default_lab: str,
 ) -> list[dict]:
-    """Group by draw date + lab so multi-file imports keep distinct labs/workplaces."""
-    buckets: dict[tuple[str, str], list] = {}
-    order: list[tuple[str, str]] = []
+    """Group by date + panel; merge same-day same-panel across different lab OCR names."""
+    from app.services.draw_match import looks_like_same_report, panel_family, panels_compatible
+
+    by_date: dict[str, list] = {}
+    date_order: list[str] = []
     for p in proposals:
         d = p.get("proposed_drawn_on") or ""
-        lab = (p.get("proposed_lab_name") or "").strip() or (default_lab or "").strip() or "Laboratoř"
-        key = (d, lab.casefold())
-        if key not in buckets:
-            buckets[key] = []
-            order.append(key)
-        buckets[key].append(p)
+        if d not in by_date:
+            by_date[d] = []
+            date_order.append(d)
+        by_date[d].append(p)
+
+    merged_groups: list[list] = []
+    for d in sorted(date_order, key=lambda x: x or "9999"):
+        clusters: list[list] = []
+        for p in by_date[d]:
+            placed = False
+            pf = panel_family([p])
+            for cluster in clusters:
+                cf = panel_family(cluster)
+                if not panels_compatible(pf, cf):
+                    continue
+                same_panel = pf == cf and pf != "unknown"
+                if same_panel or looks_like_same_report([p], cluster):
+                    cluster.append(p)
+                    placed = True
+                    break
+            if not placed:
+                clusters.append([p])
+        # Merge clusters that are the same report (e.g. two files, slightly different rows)
+        i = 0
+        while i < len(clusters):
+            j = i + 1
+            while j < len(clusters):
+                if looks_like_same_report(clusters[i], clusters[j]) or (
+                    panels_compatible(panel_family(clusters[i]), panel_family(clusters[j]))
+                    and panel_family(clusters[i]) == panel_family(clusters[j])
+                    and panel_family(clusters[i]) != "unknown"
+                ):
+                    clusters[i].extend(clusters[j])
+                    clusters.pop(j)
+                    continue
+                j += 1
+            i += 1
+        merged_groups.extend(clusters)
 
     groups: list[dict] = []
-    for i, key in enumerate(sorted(order, key=lambda k: (k[0] or "9999", k[1]))):
-        rows = buckets[key]
-        date_s, _lab_fold = key
-        lab_name = next(
-            ((r.get("proposed_lab_name") or "").strip() for r in rows if (r.get("proposed_lab_name") or "").strip()),
-            default_lab or "Laboratoř",
-        )
+    for i, rows in enumerate(merged_groups):
+        date_s = next((r.get("proposed_drawn_on") or "" for r in rows), "")
+        lab_names = [
+            (r.get("proposed_lab_name") or "").strip()
+            for r in rows
+            if (r.get("proposed_lab_name") or "").strip()
+        ]
+        lab_name = max(lab_names, key=len) if lab_names else (default_lab or "Laboratoř")
         workplace = next(
-            ((r.get("proposed_workplace") or "").strip() for r in rows if (r.get("proposed_workplace") or "").strip()),
+            (
+                (r.get("proposed_workplace") or "").strip()
+                for r in rows
+                if (r.get("proposed_workplace") or "").strip()
+            ),
             "",
         )
         candidates: list[dict] = []
@@ -90,7 +129,15 @@ def _build_groups(
         if date_s:
             parsed = parse_iso_date(date_s)
             if parsed:
-                cands = find_draw_candidates(db, user_id, parsed, lab_name)
+                drawn_at = date_to_datetime(parsed)
+                cands = find_draw_candidates(
+                    db,
+                    user_id,
+                    parsed,
+                    lab_name,
+                    drawn_at=drawn_at,
+                    proposal_rows=rows,
+                )
                 candidates = [_candidate_info(c) for c in cands]
                 if len(candidates) == 1:
                     default_choice = f"existing:{candidates[0]['id']}"
@@ -291,13 +338,13 @@ async def import_upload(
     if len(uploads) > max_files:
         request.session["flash"] = f"Max. {max_files} souborů najednou (vybráno {len(uploads)})."
         return redirect("/import")
-    mode = (extract_mode or "smart").lower()
-    if mode == "smart":
-        if not smart_enabled():
-            mode = "classic"
-        elif smart_consent not in {"1", "on", "true", "yes"}:
-            request.session["flash"] = "Pro Smart AI je potřeba souhlas s odesláním reportu na NVIDIA."
-            return redirect("/import")
+    if not smart_enabled():
+        request.session["flash"] = "Smart AI není dostupná (chybí NVIDIA API klíč)."
+        return redirect("/import")
+    mode = "smart"
+    if smart_consent not in {"1", "on", "true", "yes"}:
+        request.session["flash"] = "Pro Smart AI je potřeba souhlas s odesláním reportu na NVIDIA."
+        return redirect("/import")
 
     first = uploads[0]
     job = ImportJob(

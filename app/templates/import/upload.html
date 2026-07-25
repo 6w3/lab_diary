@@ -23,16 +23,14 @@
   <fieldset class="extract-mode">
     <legend>{{ t('extract_mode') }}</legend>
     {% if smart_available %}
-    <label class="check">
-      <input type="radio" name="extract_mode" value="smart" {% if default_smart %}checked{% endif %}> {{ t('extract_smart') }}
-    </label>
+    <input type="hidden" name="extract_mode" value="smart">
+    <p class="muted">{{ t('extract_smart') }}</p>
     <label class="check smart-consent">
-      <input type="checkbox" name="smart_consent" value="1" {% if default_smart %}checked{% endif %}> {{ t('smart_consent') }}
+      <input type="checkbox" name="smart_consent" value="1" checked> {{ t('smart_consent') }}
     </label>
+    {% else %}
+    <p class="muted">{{ t('smart_unavailable') }}</p>
     {% endif %}
-    <label class="check">
-      <input type="radio" name="extract_mode" value="classic" {% if not default_smart %}checked{% endif %}> {{ t('extract_classic') }}
-    </label>
   </fieldset>
   <button type="submit">{{ t('read_report') }}</button>
 </form>

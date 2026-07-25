@@ -43,21 +43,64 @@ def find_draw_candidates(
     user_id: int,
     day: date,
     lab_name: str,
+    *,
+    drawn_at: datetime | None = None,
+    proposal_rows: list | None = None,
 ) -> list:
+    """Find existing draws to merge into.
+
+    Always matches same calendar day + exact lab_name.
+    Also matches same day (or ±2h) when proposal_rows look like the same report
+    and panel families are compatible (won't glue hema + biochem).
+    """
     from app.models import BloodDraw
+    from app.services.draw_match import (
+        drawn_at_close,
+        looks_like_same_report,
+        panel_family,
+        panels_compatible,
+    )
 
     lab = (lab_name or "").strip().casefold()
     rows = db.query(BloodDraw).filter(BloodDraw.user_id == user_id).all()
-    out = []
-    for d in rows:
-        if not d.drawn_at or d.drawn_at.date() != day:
-            continue
-        if (d.lab_name or "").strip().casefold() != lab:
-            continue
+    prop_panel = panel_family(proposal_rows or []) if proposal_rows else "unknown"
+    out: list = []
+    seen: set[int] = set()
+
+    def _add(d) -> None:
+        if d.id in seen:
+            return
+        seen.add(d.id)
         out.append(d)
+
+    for d in rows:
+        if not d.drawn_at:
+            continue
+        same_day = d.drawn_at.date() == day
+        close_time = drawn_at is not None and drawn_at_close(d.drawn_at, drawn_at)
+        if not same_day and not close_time:
+            continue
+        if (d.lab_name or "").strip().casefold() == lab:
+            _add(d)
+            continue
+        if not proposal_rows:
+            continue
+        existing_rows = [r for r in (getattr(d, "results", None) or []) if getattr(r, "confirmed", True)]
+        if not existing_rows:
+            continue
+        if not panels_compatible(prop_panel, panel_family(existing_rows)):
+            continue
+        if looks_like_same_report(proposal_rows, existing_rows):
+            _add(d)
+            continue
+        if close_time or same_day:
+            from app.services.draw_match import jaccard, marker_key_set
+
+            # Same day / ±2h + meaningful marker overlap → merge candidate
+            if jaccard(marker_key_set(proposal_rows), marker_key_set(existing_rows)) >= 0.35:
+                _add(d)
     out.sort(key=lambda d: d.id)
     return out
-
 
 def create_draw(
     db,

@@ -152,6 +152,7 @@
   "extract_classic": "Classic (on-server, free) — text OCR only, no AI; manual editing needed",
   "extract_smart": "Smart AI (NVIDIA — understands photos/tables) — Recommended",
   "smart_consent": "I agree to send this report to NVIDIA NIM for analysis",
+  "smart_unavailable": "Smart AI is not available right now. Try again later.",
   "multi_date_hint": "Multiple draw dates detected. Confirming will create separate draws per date.",
   "detected_dates": "Detected dates",
   "single_date_hint": "Draw date",
