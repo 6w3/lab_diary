@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
+from app.i18n import t
 from app.models import Attachment, BloodDraw, DrawConditions, ImportJob, Marker, ResultValue, User
 from app.services.draw_organize import (
     apply_draw_conditions,
@@ -20,6 +21,7 @@ from app.services.multi_date import unique_drawn_dates
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
 from app.services.result_bind import bind_marker_and_units
 from app.services.smart_extract import smart_enabled
+from app.services.storage import delete_file
 from app.services.units import UNIT_CHOICES, unit_options_for_marker
 
 router = APIRouter(prefix="/draws", tags=["draws"])
@@ -437,6 +439,33 @@ def _resolve_target_draw(
     db.add(new_draw)
     db.flush()
     return new_draw
+
+
+@router.post("/{draw_id}/ocr/{attachment_id}/discard")
+def ocr_discard(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    draw_id: int,
+    attachment_id: int,
+):
+    """Drop attachment + its unconfirmed OCR proposals from a draw."""
+    draw = _get_owned_draw(db, user.id, draw_id)
+    if not draw:
+        return redirect("/draws")
+    att = db.get(Attachment, attachment_id)
+    if not att or att.blood_draw_id != draw.id:
+        return redirect(f"/draws/{draw_id}")
+
+    for row in list(draw.results):
+        if not row.confirmed and row.attachment_id == att.id:
+            db.delete(row)
+    delete_file(att.storage_path)
+    db.delete(att)
+    db.commit()
+    request.session["flash"] = t(locale, "document_discarded")
+    return redirect(f"/draws/{draw_id}")
 
 
 @router.post("/{draw_id}/ocr/{attachment_id}/confirm")

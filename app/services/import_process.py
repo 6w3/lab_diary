@@ -38,10 +38,16 @@ def extract_file(
     marker_hints: list[str],
 ) -> tuple[str, list[dict], dict]:
     if mode == "smart":
-        raw, proposals, meta = run_smart_extract(storage_path, marker_hints=marker_hints)
-        proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
-        meta = {**(meta or {}), **merge_meta}
-        return raw, proposals, meta
+        try:
+            raw, proposals, meta = run_smart_extract(storage_path, marker_hints=marker_hints)
+            proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
+            meta = {**(meta or {}), **merge_meta}
+            return raw, proposals, meta
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Smart extract failed; falling back to classic: %s", exc)
+            raw, proposals, meta = extract_document(storage_path)
+            meta = {**(meta or {}), "engine": meta.get("engine") or "classic", "smart_error": str(exc)[:300]}
+            return raw, proposals, meta
     return extract_document(storage_path)
 
 

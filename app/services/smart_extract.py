@@ -108,6 +108,8 @@ def _encode_image(path: Path) -> tuple[str, str]:
 
 def _extract_json(text: str) -> dict[str, Any]:
     text = (text or "").strip()
+    if not text:
+        raise json.JSONDecodeError("Expecting value", text, 0)
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
@@ -118,6 +120,21 @@ def _extract_json(text: str) -> dict[str, Any]:
         if not m:
             raise
         return json.loads(m.group(0))
+
+
+def _message_text(msg: dict[str, Any]) -> str:
+    """Prefer final content; fall back to last JSON object in reasoning dump."""
+    content = str(msg.get("content") or "").strip()
+    if content:
+        return content
+    reasoning = str(msg.get("reasoning_content") or "").strip()
+    if not reasoning:
+        return ""
+    matches = list(re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", reasoning, re.DOTALL))
+    if matches:
+        return matches[-1].group(0)
+    m = re.search(r"\{.*\}", reasoning, re.DOTALL)
+    return m.group(0) if m else reasoning
 
 
 def _normalize_drawn_on(raw: str) -> str | None:
@@ -321,6 +338,8 @@ def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
         ],
         "max_tokens": max_tokens,
         "temperature": 0.1,
+        # Nemotron omni/reasoning otherwise fills the budget with CoT and returns empty content.
+        "chat_template_kwargs": {"enable_thinking": False},
     }
     headers = {
         "Authorization": f"Bearer {settings.nvidia_api_key}",
@@ -334,10 +353,10 @@ def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
             raise RuntimeError(f"NVIDIA API {resp.status_code}: {resp.text[:500]}")
         body = resp.json()
     msg = body["choices"][0]["message"]
-    text = msg.get("content") or ""
-    if not str(text).strip() and msg.get("reasoning_content"):
-        # Fallback if provider puts final answer only in reasoning_content.
-        text = msg.get("reasoning_content") or ""
+    text = _message_text(msg if isinstance(msg, dict) else dict(msg))
+    if not text.strip():
+        finish = (body.get("choices") or [{}])[0].get("finish_reason")
+        raise RuntimeError(f"NVIDIA returned empty content (finish={finish})")
     return text
 
 

@@ -62,6 +62,11 @@
     <button type="submit">{{ t('confirm_results') }}</button>
   </p>
 </form>
+<form method="post" action="/draws/{{ draw.id }}/ocr/{{ attachment.id }}/discard" class="danger-zone"
+      data-confirm="{{ t('discard_document_confirm') }}"
+      onsubmit="return confirm(this.getAttribute('data-confirm'))">
+  <button type="submit" class="danger">{{ t('discard_document') }}</button>
+</form>
 <details>
   <summary>OCR raw</summary>
   <pre>{{ attachment.ocr_raw_text }}</pre>

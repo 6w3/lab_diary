@@ -30,7 +30,8 @@ from app.services.multi_date import unique_drawn_dates
 from app.services.ocr_tables import date_to_datetime, parse_iso_date
 from app.services.result_bind import bind_marker_and_units
 from app.services.smart_extract import smart_enabled
-from app.services.storage import save_import_upload
+from app.i18n import t
+from app.services.storage import delete_file, save_import_upload
 from app.services.units import UNIT_CHOICES
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -370,6 +371,27 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             multi_date=multi_date,
         ),
     )
+
+
+@router.post("/{job_id}/discard")
+def import_discard(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+    """Drop import job + uploaded files without creating draws."""
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id or job.status not in {"review", "failed"}:
+        return redirect("/draws")
+
+    atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
+    paths = {a.storage_path for a in atts if a.storage_path}
+    if job.storage_path:
+        paths.add(job.storage_path)
+    for path in paths:
+        delete_file(path)
+    for att in atts:
+        db.delete(att)
+    db.delete(job)
+    db.commit()
+    request.session["flash"] = t(locale, "document_discarded")
+    return redirect("/draws")
 
 
 @router.post("/{job_id}/confirm")

@@ -2,7 +2,9 @@ from datetime import date, timedelta
 
 from app.services.multi_date import unique_drawn_dates
 from app.services.smart_extract import (
+    _extract_json,
     _is_consecutive_day_run,
+    _message_text,
     _sanitize_discovered_dates,
     looks_like_hallucinated_extract,
 )
@@ -57,3 +59,26 @@ def test_real_single_draw_not_hallucination():
         {"label": "Hemoglobin", "marker_code": "hgb", "value": 162.0, "proposed_drawn_on": "2024-06-07"},
     ]
     assert not looks_like_hallucinated_extract(props)
+
+
+def test_message_text_prefers_content():
+    assert _message_text({"content": '{"a":1}', "reasoning_content": "noise {\"a\":2}"}) == '{"a":1}'
+
+
+def test_message_text_falls_back_to_reasoning_json():
+    msg = {
+        "content": "",
+        "reasoning_content": "thinking...\nfinal answer:\n{\"layout\":\"multi_column\",\"dates\":[\"2020-10-14\"]}\n",
+    }
+    text = _message_text(msg)
+    assert _extract_json(text)["layout"] == "multi_column"
+
+
+def test_extract_json_rejects_empty():
+    import json
+
+    try:
+        _extract_json("")
+        assert False, "expected JSONDecodeError"
+    except json.JSONDecodeError:
+        pass
