@@ -201,6 +201,8 @@ def _file_verify_cards(job: ImportJob, db, *, locale: str) -> tuple[list, str]:
         sig_parts.append(f"{a.id}:{a.ocr_status}:{len(markers)}")
     return cards, "|".join(sig_parts)
 
+
+def _progress_file_entry(att: Attachment, atts: list[Attachment], total: int) -> dict:
     pos = next((i + 1 for i, x in enumerate(atts) if x.id == att.id), None)
     return {
         "attachment_id": att.id,
