@@ -144,6 +144,8 @@
   "required": "required",
   "empty_draws": "No draws yet.",
   "ocr_review": "OCR review",
+  "review_tab_results": "Results",
+  "review_tab_files": "Files",
   "discard_document": "Discard document",
   "discard_document_confirm": "Really discard this document? The file and proposed results will be deleted.",
   "document_discarded": "Document discarded.",

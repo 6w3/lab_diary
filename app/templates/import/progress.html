@@ -4,7 +4,7 @@
 <section class="import-progress card" id="import-progress"
          data-job-id="{{ job.id }}"
          data-status="{{ progress.status }}"
-         data-review-url="/import/{{ job.id }}/review"
+         data-review-url="{{ review_url }}"
          data-retry-label="{{ t('import_retry_file') }}"
          data-retry-all-label="{{ t('import_retry_all_failed') }}"
          data-review-ready-label="{{ t('import_review_ready') }}">
@@ -20,7 +20,7 @@
 
   <p id="progress-review-cta" class="progress-review-cta"
      {% if not progress.review_ready or progress.status == 'review' %}hidden{% endif %}>
-    <a class="btn" id="progress-review-link" href="/import/{{ job.id }}/review">
+    <a class="btn" id="progress-review-link" href="{{ review_url }}">
       {{ t('import_review_ready', count=progress.proposal_count or 0) }}
     </a>
     <span class="muted">{{ t('import_review_while_running_hint') }}</span>
@@ -160,6 +160,10 @@
     if (retryHint) retryHint.hidden = !multi;
   }
 
+  function preferredReviewUrl(data) {
+    return root.dataset.reviewUrl || data.review_url || ("/import/" + jobId + "/review");
+  }
+
   function renderReviewCta(data) {
     if (!reviewCta || !reviewLink) return;
     // Full batch done → auto-redirect; mid-flight → show CTA.
@@ -167,9 +171,9 @@
       reviewCta.hidden = true;
       return;
     }
-    if (data.review_ready && data.review_url) {
+    if (data.review_ready) {
       reviewCta.hidden = false;
-      reviewLink.href = data.review_url;
+      reviewLink.href = preferredReviewUrl(data);
       reviewLink.textContent = reviewReadyTpl.replace("{count}", String(data.proposal_count || 0));
     } else {
       reviewCta.hidden = true;
@@ -186,9 +190,9 @@
     renderNameList(queuedBox, queuedList, data.file_queued);
     renderFileErrors(data.file_errors);
     renderReviewCta(data);
-    if (data.status === "review" && data.review_url) {
+    if (data.status === "review") {
       stopped = true;
-      window.location.href = data.review_url;
+      window.location.href = preferredReviewUrl(data);
       return true;
     }
     if (data.status === "failed") {

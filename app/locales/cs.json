@@ -144,6 +144,8 @@
   "required": "povinné",
   "empty_draws": "Zatím žádné odběry.",
   "ocr_review": "Kontrola OCR",
+  "review_tab_results": "Výsledky",
+  "review_tab_files": "Soubory",
   "discard_document": "Zahodit dokument",
   "discard_document_confirm": "Opravdu zahodit tento dokument? Soubor a návrh výsledků se smažou.",
   "document_discarded": "Dokument zahozen.",

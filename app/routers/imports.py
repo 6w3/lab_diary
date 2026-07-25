@@ -6,13 +6,14 @@ import json
 from datetime import date, datetime
 from types import SimpleNamespace
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.deps import DbDep, LocaleDep, UserDep, read_form, redirect, template_context
 from app.models import Attachment, BloodDraw, ImportJob, Marker, ResultValue
+from app.services.attachment_preview import ensure_preview_jpeg
 from app.services.draw_organize import (
     apply_draw_conditions,
     find_draw_candidates,
@@ -405,16 +406,28 @@ async def import_upload(
 
 
 @router.get("/{job_id}/progress", response_class=HTMLResponse)
-def import_progress(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+def import_progress(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    job_id: int,
+    tab: str = Query(""),
+):
     job = db.get(ImportJob, job_id)
     if not job or job.user_id != user.id:
         return redirect("/import")
+    review_tab = (tab or "").strip().lower()
+    if review_tab not in {"results", "files"}:
+        review_tab = ""
+    review_qs = f"?tab={review_tab}" if review_tab else ""
     if job.status == "review":
-        return redirect(f"/import/{job.id}/review")
+        return redirect(f"/import/{job.id}/review{review_qs}")
     if job.status not in {"processing", "failed"}:
         return redirect("/import")
     # Ensure worker is awake if user reopened progress page
     kick_import_worker()
+    review_url = f"/import/{job.id}/review{review_qs}"
     return templates.TemplateResponse(
         request,
         "import/progress.html",
@@ -423,6 +436,7 @@ def import_progress(request: Request, db: DbDep, locale: LocaleDep, user: UserDe
             locale,
             job=job,
             progress=_progress_dict(job, db, locale=locale),
+            review_url=review_url,
         ),
     )
 
@@ -522,10 +536,20 @@ async def conditions_wizard_post(request: Request, db: DbDep, user: UserDep):
 
 
 @router.get("/{job_id}/review", response_class=HTMLResponse)
-def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+def import_review(
+    request: Request,
+    db: DbDep,
+    locale: LocaleDep,
+    user: UserDep,
+    job_id: int,
+    tab: str = Query("results"),
+):
     job = db.get(ImportJob, job_id)
     if not job or job.user_id != user.id or job.status not in {"review", "processing"}:
         return redirect("/draws")
+    view_tab = (tab or "results").strip().lower()
+    if view_tab not in {"results", "files"}:
+        view_tab = "results"
     raw_payload = job_payload(job)
     if job.status == "processing" and not (raw_payload.get("proposals") or []):
         return redirect(f"/import/{job.id}/progress")
@@ -646,8 +670,36 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             progress_url=f"/import/{job.id}/progress",
             reextract_atts=reextract_atts,
             smart_available=smart_enabled(),
+            review_tab=view_tab,
         ),
     )
+
+
+@router.get("/{job_id}/attachment/{att_id}/preview")
+def import_attachment_preview(
+    db: DbDep,
+    user: UserDep,
+    job_id: int,
+    att_id: int,
+):
+    """Serve a JPEG thumbnail of an import attachment (auth-gated)."""
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id:
+        return Response(status_code=404)
+    att = db.get(Attachment, att_id)
+    if not att or att.import_job_id != job.id:
+        return Response(status_code=404)
+    preview = ensure_preview_jpeg(att.storage_path)
+    if preview is None:
+        # Tiny 1x1 transparent-ish gray PNG as last resort is worse than SVG placeholder
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200">'
+            '<rect width="100%" height="100%" fill="#f0f0f0"/>'
+            '<text x="50%" y="50%" text-anchor="middle" fill="#888" font-size="14">'
+            "preview unavailable</text></svg>"
+        )
+        return Response(content=svg.encode("utf-8"), media_type="image/svg+xml")
+    return FileResponse(preview, media_type="image/jpeg", filename=preview.name)
 
 
 def _lab_from_attachment_raw(att: Attachment) -> str:
@@ -730,12 +782,12 @@ async def import_reextract(request: Request, db: DbDep, user: UserDep, job_id: i
         att_id = 0
     hint = (form.get("user_hint") or "").strip()
     if not att_id:
-        return redirect(f"/import/{job.id}/review")
+        return redirect(f"/import/{job.id}/review?tab=files")
     ok = queue_attachment_reextract(db, job, attachment_id=att_id, user_hint=hint)
     if ok:
         kick_import_worker()
-        return redirect(f"/import/{job.id}/progress")
-    return redirect(f"/import/{job.id}/review")
+        return redirect(f"/import/{job.id}/progress?tab=files")
+    return redirect(f"/import/{job.id}/review?tab=files")
 
 
 @router.post("/{job_id}/discard")
