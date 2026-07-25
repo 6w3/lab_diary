@@ -31,9 +31,13 @@ def ensure_upload_dir() -> Path:
     return path
 
 
-def _store_upload(file: UploadFile, dest_dir: Path) -> tuple[str, str, str]:
+def _store_upload(file: UploadFile, dest_dir: Path) -> tuple[str, str, str, str]:
     original = file.filename or "upload.bin"
-    suffix = Path(original).suffix.lower()
+    # Keep a display-safe basename (no path segments from client).
+    original_name = Path(original).name.strip() or "upload.bin"
+    if len(original_name) > 255:
+        original_name = original_name[:255]
+    suffix = Path(original_name).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError(f"Unsupported file type: {suffix}")
 
@@ -57,16 +61,17 @@ def _store_upload(file: UploadFile, dest_dir: Path) -> tuple[str, str, str]:
         content_type = "image/jpeg"
         stored_name = jpeg_path.name
 
-    return stored_name, content_type, str(dest)
+    return stored_name, content_type, str(dest), original_name
 
 
 def save_upload(file: UploadFile, user_id: int, draw_id: int) -> tuple[str, str, str]:
     ensure_upload_dir()
     dest_dir = ensure_upload_dir() / str(user_id) / str(draw_id)
-    return _store_upload(file, dest_dir)
+    stored, content_type, path, _original = _store_upload(file, dest_dir)
+    return stored, content_type, path
 
 
-def save_import_upload(file: UploadFile, user_id: int, job_id: int) -> tuple[str, str, str]:
+def save_import_upload(file: UploadFile, user_id: int, job_id: int) -> tuple[str, str, str, str]:
     ensure_upload_dir()
     dest_dir = ensure_upload_dir() / str(user_id) / "imports" / str(job_id)
     return _store_upload(file, dest_dir)

@@ -5,11 +5,25 @@
 {% if file_errors %}
   <div class="card error-box">
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
-    <ul>
+    <ul class="file-error-list">
       {% for e in file_errors %}
-        <li><strong>{{ e.filename }}</strong>: {{ e.error }}</li>
+        <li>
+          <span><strong>{{ t('import_file_error_item', label=e.filename) }}</strong>: {{ e.error }}</span>
+          {% if e.attachment_id %}
+          <form method="post" action="/import/{{ job.id }}/retry-files" class="inline-form">
+            <input type="hidden" name="attachment_id" value="{{ e.attachment_id }}">
+            <button type="submit" class="secondary">{{ t('import_retry_file') }}</button>
+          </form>
+          {% endif %}
+        </li>
       {% endfor %}
     </ul>
+    {% if file_errors|length > 1 %}
+    <form method="post" action="/import/{{ job.id }}/retry-files">
+      <input type="hidden" name="retry_all" value="1">
+      <button type="submit" class="secondary">{{ t('import_retry_all_failed') }}</button>
+    </form>
+    {% endif %}
   </div>
 {% endif %}
 {% if multi_date %}
@@ -19,14 +33,6 @@
   <p class="muted">{{ t('single_date_hint') }}: {{ detected_dates | join(', ') }}</p>
 {% endif %}
 <form method="post" action="/import/{{ job.id }}/confirm" id="review-form">
-  <div class="card">
-    <label>{{ t('lab_name') }}
-      <input type="text" name="lab_name" value="{{ lab_name }}" required>
-    </label>
-    <label>{{ t('workplace') }}
-      <input type="text" name="workplace" placeholder="{{ t('optional') }}">
-    </label>
-  </div>
   <table id="review-table">
     <thead>
       <tr>
@@ -46,17 +52,25 @@
         <tr class="date-group">
           <td colspan="8">
             <strong>{{ t('drawn_at') }}: {{ g.date or '—' }}</strong>
+            <div class="group-lab-fields">
+              <label>{{ t('lab_name') }}
+                <input type="text" name="lab_name_{{ g.idx }}" value="{{ g.lab_name }}" required>
+              </label>
+              <label>{{ t('workplace') }}
+                <input type="text" name="workplace_{{ g.idx }}" value="{{ g.workplace }}" placeholder="{{ t('optional') }}">
+              </label>
+            </div>
             {% if g.candidates %}
               <div class="merge-choice">
                 <p class="muted">{{ t('existing_draw_hint') }}</p>
                 {% if g.candidates|length == 1 %}
                   <label class="check">
-                    <input type="radio" name="merge_{{ g.date }}" value="existing:{{ g.candidates[0].id }}"
+                    <input type="radio" name="merge_{{ g.idx }}" value="existing:{{ g.candidates[0].id }}"
                       {% if g.default_choice.startswith('existing:') %}checked{% endif %}>
                     {{ t('merge_into_existing') }} — {{ g.candidates[0].label }}
                   </label>
                   <label class="check">
-                    <input type="radio" name="merge_{{ g.date }}" value="new"
+                    <input type="radio" name="merge_{{ g.idx }}" value="new"
                       {% if g.default_choice == 'new' %}checked{% endif %}>
                     {{ t('different_draw') }}
                   </label>
@@ -64,18 +78,18 @@
                   <p class="muted">{{ t('pick_existing_or_new') }}</p>
                   {% for c in g.candidates %}
                     <label class="check">
-                      <input type="radio" name="merge_{{ g.date }}" value="existing:{{ c.id }}" required>
+                      <input type="radio" name="merge_{{ g.idx }}" value="existing:{{ c.id }}" required>
                       {{ t('merge_into_existing') }} — {{ c.label }}
                     </label>
                   {% endfor %}
                   <label class="check">
-                    <input type="radio" name="merge_{{ g.date }}" value="new" required>
+                    <input type="radio" name="merge_{{ g.idx }}" value="new" required>
                     {{ t('different_draw') }}
                   </label>
                 {% endif %}
               </div>
             {% else %}
-              <input type="hidden" name="merge_{{ g.date }}" value="new">
+              <input type="hidden" name="merge_{{ g.idx }}" value="new">
             {% endif %}
           </td>
         </tr>
@@ -84,6 +98,7 @@
           <td><input type="checkbox" name="selected" value="{{ ns.idx }}" checked></td>
           <td>
             <input type="hidden" name="attachment_id_{{ ns.idx }}" value="{{ r.attachment_id or '' }}">
+            <input type="hidden" name="group_idx_{{ ns.idx }}" value="{{ g.idx }}">
             <input type="text" name="label_{{ ns.idx }}" value="{{ r.label }}" placeholder="{{ t('source_label') }}">
           </td>
           <td>
@@ -140,6 +155,7 @@
     <td><input type="checkbox" name="selected" value="__IDX__" checked></td>
     <td>
       <input type="hidden" name="attachment_id___IDX__" value="">
+      <input type="hidden" name="group_idx___IDX__" value="{{ groups[-1].idx if groups else 0 }}">
       <input type="text" name="label___IDX__" value="" placeholder="{{ t('source_label') }}">
     </td>
     <td>

@@ -98,6 +98,8 @@ def enrich_proposals(
                 "notes": p.get("notes") or "",
                 "proposed_drawn_on": drawn,
                 "attachment_id": p.get("attachment_id"),
+                "proposed_lab_name": (str(p.get("proposed_lab_name") or "").strip() or None),
+                "proposed_workplace": (str(p.get("proposed_workplace") or "").strip() or None),
             }
         )
     return out
@@ -110,9 +112,26 @@ def finalize_job(db: Session, job: ImportJob) -> None:
     catalog = db.query(Marker).all()
     user_aliases = load_user_aliases(db, job.user_id)
     all_proposals = filter_proposals(list(payload.get("proposals") or []))
+    detected_lab = (payload.get("detected_lab") or "").strip()
+    form_lab = (payload.get("lab_name_form") or "").strip()
+    default_lab = form_lab or detected_lab or "Laboratoř"
+    labs_by_att = payload.get("labs_by_attachment") or {}
+    for p in all_proposals:
+        if not (p.get("proposed_lab_name") or "").strip():
+            info = labs_by_att.get(str(p.get("attachment_id") or "")) or {}
+            p["proposed_lab_name"] = (info.get("lab_name") or default_lab or "").strip() or None
+        if not (p.get("proposed_workplace") or "").strip():
+            info = labs_by_att.get(str(p.get("attachment_id") or "")) or {}
+            wp = (info.get("workplace") or "").strip()
+            if wp:
+                p["proposed_workplace"] = wp
     all_proposals = sorted(
         all_proposals,
-        key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
+        key=lambda p: (
+            str(p.get("proposed_drawn_on") or ""),
+            str(p.get("proposed_lab_name") or ""),
+            str(p.get("label") or ""),
+        ),
     )
     # Smart code wins when present; LIS brackets + fuzzy fill gaps (avoids custom flood).
     enriched = enrich_proposals(
@@ -123,9 +142,6 @@ def finalize_job(db: Session, job: ImportJob) -> None:
     )
     enriched = filter_proposals(enriched)
     detected_dates = unique_drawn_dates(enriched)
-    detected_lab = (payload.get("detected_lab") or "").strip()
-    form_lab = (payload.get("lab_name_form") or "").strip()
-    default_lab = form_lab or detected_lab or "Laboratoř"
     raw_parts = payload.get("raw_parts") or []
     job.ocr_raw_text = "\n\n".join(raw_parts) if raw_parts else job.ocr_raw_text
     atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
@@ -137,6 +153,7 @@ def finalize_job(db: Session, job: ImportJob) -> None:
             "proposals": enriched,
             "detected_dates": detected_dates,
             "file_errors": file_errors,
+            "labs_by_attachment": labs_by_att,
             "extract_meta": {
                 "source": job.extract_mode,
                 "dates": detected_dates,
@@ -147,6 +164,18 @@ def finalize_job(db: Session, job: ImportJob) -> None:
         },
     )
     job.status = "review"
+
+
+def attachment_display_name(att: Attachment, *, index: int | None = None, total: int | None = None) -> str:
+    """Human label for UI: original upload name, falling back to stored name."""
+    original = getattr(att, "original_filename", None)
+    stored = getattr(att, "filename", None)
+    name = (original or "").strip() or (stored or "").strip() or "file"
+    if index is not None and total is not None and total > 0:
+        return f"{index}/{total} — {name}"
+    if index is not None:
+        return f"#{index} — {name}"
+    return name
 
 
 def record_file_failure(
@@ -160,12 +189,24 @@ def record_file_failure(
     msg = (error or "extract_failed").strip() or "extract_failed"
     att.ocr_status = "failed"
     att.ocr_raw_text = msg[:2000]
+    siblings = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .order_by(Attachment.id)
+        .all()
+    )
+    pos = next((i + 1 for i, a in enumerate(siblings) if a.id == att.id), None)
+    display = attachment_display_name(att, index=pos, total=len(siblings) or None)
     payload = job_payload(job)
     errs = [e for e in (payload.get("file_errors") or []) if e.get("attachment_id") != att.id]
     errs.append(
         {
             "attachment_id": att.id,
-            "filename": att.filename,
+            "filename": display,
+            "original_filename": (getattr(att, "original_filename", None) or "").strip() or None,
+            "stored_filename": getattr(att, "filename", None),
+            "index": pos,
+            "total": len(siblings) or None,
             "error": msg[:500],
         }
     )
@@ -256,6 +297,46 @@ def fail_timed_out_attachment(db: Session, att_id: int, *, error: str) -> bool:
     finish_job_if_idle(db, job)
     db.commit()
     return True
+
+
+def retry_failed_attachments(
+    db: Session,
+    job: ImportJob,
+    attachment_ids: list[int] | None = None,
+) -> int:
+    """Re-queue failed attachments for another extract attempt. Returns count queued.
+
+    Keeps existing proposals. Job must be in review (or failed with partial data).
+    """
+    if job.status not in {"review", "failed"}:
+        return 0
+    atts = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id, Attachment.ocr_status == "failed")
+        .all()
+    )
+    if attachment_ids is not None:
+        wanted = set(attachment_ids)
+        atts = [a for a in atts if a.id in wanted]
+    if not atts:
+        return 0
+
+    payload = job_payload(job)
+    drop_ids = {a.id for a in atts}
+    payload["file_errors"] = [
+        e for e in (payload.get("file_errors") or []) if e.get("attachment_id") not in drop_ids
+    ]
+    # Preserve proposals / lab / dates; finalize will refresh after retries.
+    save_job_payload(job, payload)
+
+    for att in atts:
+        att.ocr_status = "pending"
+        att.ocr_raw_text = None
+
+    job.status = "processing"
+    job.ocr_raw_text = None
+    db.commit()
+    return len(atts)
 
 
 def claim_next_attachment(db: Session) -> tuple[int, int, str, str, str] | None:
@@ -378,15 +459,26 @@ def process_claimed_attachment(
     from app.services.proposal_filter import filter_proposals
 
     payload = job_payload(job)
+    file_lab = ((meta or {}).get("lab_name") or "").strip() or None
+    file_wp = ((meta or {}).get("workplace") or "").strip() or None
     for p in filter_proposals(proposals):
         row = dict(p)
         row["attachment_id"] = att.id
+        if file_lab and not (row.get("proposed_lab_name") or "").strip():
+            row["proposed_lab_name"] = file_lab
+        if file_wp and not (row.get("proposed_workplace") or "").strip():
+            row["proposed_workplace"] = file_wp
         payload.setdefault("proposals", []).append(row)
     payload["proposals"] = filter_proposals(payload.get("proposals") or [])
     payload.setdefault("raw_parts", []).append(f"--- {filename} ---\n{raw or ''}")
-    lab = ((meta or {}).get("lab_name") or "").strip()
+    lab = file_lab
     if lab and not (payload.get("detected_lab") or "").strip():
         payload["detected_lab"] = lab
+    # Keep per-file labs for review fallbacks
+    labs_by_att = dict(payload.get("labs_by_attachment") or {})
+    if file_lab or file_wp:
+        labs_by_att[str(att.id)] = {"lab_name": file_lab, "workplace": file_wp}
+        payload["labs_by_attachment"] = labs_by_att
     save_job_payload(job, payload)
 
     if _active_attachment_count(db, job.id, exclude_id=att.id) == 0:

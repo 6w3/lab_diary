@@ -20,9 +20,11 @@ from app.services.draw_organize import (
     result_is_duplicate,
 )
 from app.services.import_process import (
+    attachment_display_name,
     claim_attachment_for_job,
     maybe_finalize_idle_jobs,
     process_claimed_attachment,
+    retry_failed_attachments,
     save_job_payload,
 )
 from app.services.import_worker import kick_import_worker
@@ -51,29 +53,50 @@ def _build_groups(
     db,
     user_id: int,
     proposals: list[dict],
-    lab_name: str,
+    default_lab: str,
 ) -> list[dict]:
-    by_date: dict[str, list] = {}
+    """Group by draw date + lab so multi-file imports keep distinct labs/workplaces."""
+    buckets: dict[tuple[str, str], list] = {}
+    order: list[tuple[str, str]] = []
     for p in proposals:
         d = p.get("proposed_drawn_on") or ""
-        by_date.setdefault(d, []).append(p)
+        lab = (p.get("proposed_lab_name") or "").strip() or (default_lab or "").strip() or "Laboratoř"
+        key = (d, lab.casefold())
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(p)
+
     groups: list[dict] = []
-    for d in sorted(by_date.keys(), key=lambda x: x or "9999"):
+    for i, key in enumerate(sorted(order, key=lambda k: (k[0] or "9999", k[1]))):
+        rows = buckets[key]
+        date_s, _lab_fold = key
+        lab_name = next(
+            ((r.get("proposed_lab_name") or "").strip() for r in rows if (r.get("proposed_lab_name") or "").strip()),
+            default_lab or "Laboratoř",
+        )
+        workplace = next(
+            ((r.get("proposed_workplace") or "").strip() for r in rows if (r.get("proposed_workplace") or "").strip()),
+            "",
+        )
         candidates: list[dict] = []
         default_choice = "new"
-        if d:
-            parsed = parse_iso_date(d)
+        if date_s:
+            parsed = parse_iso_date(date_s)
             if parsed:
                 cands = find_draw_candidates(db, user_id, parsed, lab_name)
                 candidates = [_candidate_info(c) for c in cands]
                 if len(candidates) == 1:
                     default_choice = f"existing:{candidates[0]['id']}"
                 elif len(candidates) > 1:
-                    default_choice = ""  # force explicit choice
+                    default_choice = ""
         groups.append(
             {
-                "date": d,
-                "rows": by_date[d],
+                "idx": i,
+                "date": date_s,
+                "lab_name": lab_name,
+                "workplace": workplace,
+                "rows": rows,
                 "candidates": candidates,
                 "default_choice": default_choice,
             }
@@ -113,7 +136,12 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
     current = next((a for a in atts if a.ocr_status == "processing"), None)
     if current is None:
         current = next((a for a in atts if a.ocr_status == "pending"), None)
-    filename = current.filename if current else ""
+    current_idx = None
+    if current is not None:
+        current_idx = next((i + 1 for i, a in enumerate(atts) if a.id == current.id), None)
+    filename = (
+        attachment_display_name(current, index=current_idx, total=total) if current else ""
+    )
 
     payload = {}
     try:
@@ -121,15 +149,26 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
     except json.JSONDecodeError:
         payload = {}
     file_errors = list(payload.get("file_errors") or [])
-    if not file_errors and failed_atts:
-        file_errors = [
-            {
-                "attachment_id": a.id,
-                "filename": a.filename,
-                "error": (a.ocr_raw_text or "failed")[:500],
-            }
-            for a in failed_atts
-        ]
+    # Prefer live labels from attachments (original upload names + batch position).
+    if failed_atts:
+        by_id = {e.get("attachment_id"): e for e in file_errors if e.get("attachment_id")}
+        rebuilt = []
+        for a in failed_atts:
+            pos = next((i + 1 for i, x in enumerate(atts) if x.id == a.id), None)
+            prev = by_id.get(a.id) or {}
+            rebuilt.append(
+                {
+                    **prev,
+                    "attachment_id": a.id,
+                    "filename": attachment_display_name(a, index=pos, total=total),
+                    "original_filename": (a.original_filename or "").strip() or None,
+                    "stored_filename": a.filename,
+                    "index": pos,
+                    "total": total,
+                    "error": prev.get("error") or (a.ocr_raw_text or "failed")[:500],
+                }
+            )
+        file_errors = rebuilt
 
     if job.status == "review":
         message = i18n_t(locale, "import_progress_done")
@@ -216,11 +255,13 @@ async def import_upload(
     saved_any = False
     for file in uploads:
         try:
-            filename, content_type, storage_path = save_import_upload(file, user.id, job.id)
+            filename, content_type, storage_path, original_filename = save_import_upload(
+                file, user.id, job.id
+            )
         except ValueError:
             continue
         if not saved_any:
-            job.filename = filename
+            job.filename = original_filename
             job.content_type = content_type
             job.storage_path = storage_path
             saved_any = True
@@ -229,6 +270,7 @@ async def import_upload(
                 blood_draw_id=None,
                 import_job_id=job.id,
                 filename=filename,
+                original_filename=original_filename,
                 content_type=content_type,
                 storage_path=storage_path,
                 ocr_status="pending",
@@ -378,6 +420,55 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
     payload = json.loads(job.proposals_json or "{}")
     proposals = payload.get("proposals") or []
     file_errors = payload.get("file_errors") or []
+    job_atts = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .order_by(Attachment.id)
+        .all()
+    )
+    att_by_id = {a.id: a for a in job_atts}
+    if file_errors or any(a.ocr_status == "failed" for a in job_atts):
+        failed = [a for a in job_atts if a.ocr_status == "failed"]
+        by_err = {e.get("attachment_id"): e for e in file_errors if e.get("attachment_id")}
+        file_errors = []
+        for a in failed:
+            pos = next((i + 1 for i, x in enumerate(job_atts) if x.id == a.id), None)
+            prev = by_err.get(a.id) or {}
+            file_errors.append(
+                {
+                    **prev,
+                    "attachment_id": a.id,
+                    "filename": attachment_display_name(a, index=pos, total=len(job_atts)),
+                    "original_filename": (a.original_filename or "").strip() or None,
+                    "error": prev.get("error") or (a.ocr_raw_text or "failed")[:500],
+                }
+            )
+    # Backfill lab/workplace from per-file extract when older jobs lack proposed_* fields.
+    labs_by_att = payload.get("labs_by_attachment") or {}
+    needs_lab = any(not (p.get("proposed_lab_name") or "").strip() for p in proposals)
+    if proposals and needs_lab:
+        changed = False
+        for p in proposals:
+            att_id = p.get("attachment_id")
+            info = labs_by_att.get(str(att_id or "")) or {}
+            if not (p.get("proposed_lab_name") or "").strip():
+                lab = (info.get("lab_name") or "").strip()
+                if not lab and att_id in att_by_id:
+                    lab = _lab_from_attachment_raw(att_by_id[att_id])
+                if lab:
+                    p["proposed_lab_name"] = lab
+                    changed = True
+            if not (p.get("proposed_workplace") or "").strip():
+                wp = (info.get("workplace") or "").strip()
+                if not wp and att_id in att_by_id:
+                    wp = _workplace_from_attachment_raw(att_by_id[att_id])
+                if wp:
+                    p["proposed_workplace"] = wp
+                    changed = True
+        if changed:
+            payload["proposals"] = proposals
+            job.proposals_json = json.dumps(payload, ensure_ascii=False)
+            db.commit()
     detected_dates = payload.get("detected_dates") or unique_drawn_dates(proposals)
     multi_date = len(detected_dates) > 1
     lab_name = payload.get("lab_name") or "Laboratoř"
@@ -402,6 +493,64 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             multi_date=multi_date,
         ),
     )
+
+
+def _lab_from_attachment_raw(att: Attachment) -> str:
+    raw = (att.ocr_raw_text or "").strip()
+    if not raw.startswith("{"):
+        return ""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    for d in data.get("draws") or []:
+        lab = (d.get("lab_name") or "").strip()
+        if lab:
+            return lab[:120]
+    return ""
+
+
+def _workplace_from_attachment_raw(att: Attachment) -> str:
+    raw = (att.ocr_raw_text or "").strip()
+    if not raw.startswith("{"):
+        return ""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return ""
+    for d in data.get("draws") or []:
+        wp = (d.get("workplace") or "").strip()
+        if wp:
+            return wp[:120]
+    return ""
+
+
+@router.post("/{job_id}/retry-files")
+async def import_retry_files(request: Request, db: DbDep, user: UserDep, job_id: int):
+    """Re-queue one or more failed attachments; keep successful proposals."""
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id or job.status not in {"review", "failed"}:
+        return redirect("/draws")
+
+    form = await request.form()
+    raw_ids = form.getlist("attachment_id")
+    ids: list[int] = []
+    for raw in raw_ids:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    # Empty list + retry_all → all failed; single button sends one id.
+    retry_all = (form.get("retry_all") or "").strip() in {"1", "true", "on"}
+    n = retry_failed_attachments(
+        db,
+        job,
+        attachment_ids=None if retry_all or not ids else ids,
+    )
+    if n:
+        kick_import_worker()
+        return redirect(f"/import/{job.id}/progress")
+    return redirect(f"/import/{job.id}/review" if job.status == "review" else "/draws")
 
 
 @router.post("/{job_id}/discard")
@@ -434,19 +583,23 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
     form = await request.form()
     selected = set(form.getlist("selected"))
     count = int(form.get("count") or 0)
-    lab_name = (form.get("lab_name") or "").strip() or "Laboratoř"
-    workplace = (form.get("workplace") or "").strip() or None
     catalog = db.query(Marker).all()
 
-    # Per-date merge choice from form
-    date_choices: dict[str, str] = {}
+    # Per-group merge choice + lab/workplace (multi-file imports differ by draw)
+    group_choices: dict[str, str] = {}
+    group_labs: dict[str, tuple[str, str | None]] = {}
     for key in form.keys():
         if key.startswith("merge_"):
-            date_key = key[len("merge_") :]
-            date_choices[date_key] = (form.get(key) or "new").strip()
+            gidx = key[len("merge_") :]
+            group_choices[gidx] = (form.get(key) or "new").strip()
+        elif key.startswith("lab_name_"):
+            gidx = key[len("lab_name_") :]
+            lab = (form.get(key) or "").strip() or "Laboratoř"
+            wp = (form.get(f"workplace_{gidx}") or "").strip() or None
+            group_labs[gidx] = (lab, wp)
 
     touched: dict[int, bool] = {}  # draw_id → is_new
-    draw_cache: dict = {}  # one draw per date+merge choice within this confirm
+    draw_cache: dict = {}  # one draw per group+merge choice within this confirm
     added = 0
     skipped = 0
     job_attachments = (
@@ -472,6 +625,8 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
         lab_high = float(high_raw) if high_raw not in (None, "") else None
         notes = (form.get(f"notes_{idx}") or "").strip() or None
         date_raw = (form.get(f"date_{idx}") or "").strip()
+        gidx = (form.get(f"group_idx_{idx}") or "0").strip() or "0"
+        lab_name, workplace = group_labs.get(gidx, ("Laboratoř", None))
         code_raw = form.get(f"marker_code_{idx}")
         if code_raw is None:
             code_hint = None
@@ -487,7 +642,7 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
                 drawn_at = date_to_datetime(d)
 
         # Multi-candidate with empty choice → force new (safe)
-        choice = date_choices.get(date_raw or "", "new") or "new"
+        choice = group_choices.get(gidx, "new") or "new"
         if choice == "" or choice == "force_pick":
             choice = "new"
 
@@ -512,7 +667,7 @@ async def import_confirm(request: Request, db: DbDep, user: UserDep, job_id: int
             lab_name=lab_name,
             workplace=workplace,
             choice=choice,
-            group_key=date_raw or drawn_at.strftime("%Y-%m-%d"),
+            group_key=f"{gidx}|{date_raw or drawn_at.strftime('%Y-%m-%d')}|{lab_name.casefold()}",
         )
         if draw.id not in touched:
             touched[draw.id] = is_new

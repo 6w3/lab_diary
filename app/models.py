@@ -131,9 +131,10 @@ class Attachment(Base):
         ForeignKey("import_jobs.id", ondelete="CASCADE"), nullable=True, index=True
     )
     filename: Mapped[str] = mapped_column(String(255))
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_type: Mapped[str] = mapped_column(String(128))
     storage_path: Mapped[str] = mapped_column(String(512))
-    ocr_status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|done|failed|skipped
+    ocr_status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|processing|done|failed|skipped
     ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

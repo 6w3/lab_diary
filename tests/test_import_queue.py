@@ -4,10 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.services.import_process import (
+    attachment_display_name,
     finish_job_if_idle,
     job_payload,
     record_file_failure,
     recover_stuck_attachments,
+    retry_failed_attachments,
 )
 
 
@@ -45,6 +47,9 @@ class _AttachmentQuery:
             self._mode = "failed"
         elif "processing" in modes:
             self._mode = "processing"
+        return self
+
+    def order_by(self, *args, **kwargs):
         return self
 
     def _filtered(self):
@@ -135,13 +140,27 @@ def test_recover_stuck_without_done_resets_pending():
 def test_record_file_failure_keeps_job_processing():
     job = SimpleNamespace(id=1, status="processing", proposals_json="{}", user_id=1)
     att = SimpleNamespace(
-        id=5, import_job_id=1, ocr_status="processing", filename="x.jpg", ocr_raw_text=None
+        id=5,
+        import_job_id=1,
+        ocr_status="processing",
+        filename="aabbcc.jpg",
+        original_filename="pribram_2024.jpg",
+        ocr_raw_text=None,
     )
     db = _FakeDB(attachments=[att], jobs=[job])
     record_file_failure(db, att=att, job=job, error="boom")
     assert att.ocr_status == "failed"
     assert job.status == "processing"
-    assert "boom" in job_payload(job)["file_errors"][0]["error"]
+    err = job_payload(job)["file_errors"][0]
+    assert "boom" in err["error"]
+    assert "pribram_2024.jpg" in err["filename"]
+    assert err["filename"].startswith("1/1")
+
+
+def test_attachment_display_name_prefers_original():
+    att = SimpleNamespace(filename="deadbeef.jpg", original_filename="moje_foto.HEIC")
+    assert attachment_display_name(att) == "moje_foto.HEIC"
+    assert attachment_display_name(att, index=2, total=7) == "2/7 — moje_foto.HEIC"
 
 
 def test_finish_all_failed_marks_job_failed():
@@ -158,3 +177,27 @@ def test_finish_all_failed_marks_job_failed():
     db = _FakeDB(attachments=[att], jobs=[job])
     assert finish_job_if_idle(db, job) is True
     assert job.status == "failed"
+
+
+def test_retry_failed_attachments_requeues():
+    job = SimpleNamespace(
+        id=1,
+        status="review",
+        proposals_json='{"proposals":[{"label":"HGB"}],"file_errors":[{"attachment_id":11,"filename":"b.jpg","error":"interrupted_by_restart"}]}',
+        user_id=1,
+        ocr_raw_text=None,
+    )
+    done = SimpleNamespace(
+        id=10, import_job_id=1, ocr_status="done", filename="a.jpg", ocr_raw_text="ok"
+    )
+    failed = SimpleNamespace(
+        id=11, import_job_id=1, ocr_status="failed", filename="b.jpg", ocr_raw_text="interrupted_by_restart"
+    )
+    db = _FakeDB(attachments=[done, failed], jobs=[job])
+    n = retry_failed_attachments(db, job, attachment_ids=[11])
+    assert n == 1
+    assert failed.ocr_status == "pending"
+    assert job.status == "processing"
+    payload = job_payload(job)
+    assert payload["proposals"]
+    assert payload.get("file_errors") == []

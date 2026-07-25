@@ -28,6 +28,7 @@ Return ONLY valid JSON (no markdown) with this shape:
     {
       "drawn_on": "YYYY-MM-DD",
       "lab_name": "string or null",
+      "workplace": "string or null",
       "results": [
         {
           "marker_code": "catalog_code_or_omit",
@@ -48,6 +49,7 @@ Rules:
 - Read ONLY what is visible. NEVER invent analytes, values, or dates. NEVER copy example JSON fields.
 - The schema numbers/names above are PLACEHOLDERS only — replace them with real rows from the image.
 - Set lab_name from the report/EHR header when visible (hospital / lab / clinic). Same lab_name on every draws[] entry when it is one report.
+- Set workplace when a department/site is visible (e.g. Hematologie, biochemie); otherwise null.
 - Prefer the sample collection date ("Datum odběru") over visit/print timestamps.
 - If this is a SINGLE visit / single result list (typical EHR screen), emit ONE draws[] object with ALL visible numeric lab rows.
 - If a comparison table has several DATE COLUMNS in the header, emit one draws[] entry PER date column. Put each marker's value from that column into that draw. Do NOT collapse columns into a single draw.
@@ -290,10 +292,15 @@ def _validate_smart_payload(data: dict[str, Any]) -> dict[str, Any]:
             lab_s = str(lab).strip() if lab not in (None, "") else None
             if lab_s and len(lab_s) > 120:
                 lab_s = lab_s[:120]
+            wp = d.get("workplace")
+            wp_s = str(wp).strip() if wp not in (None, "") else None
+            if wp_s and len(wp_s) > 120:
+                wp_s = wp_s[:120]
             draws_out.append(
                 {
                     "drawn_on": drawn_on,
                     "lab_name": lab_s,
+                    "workplace": wp_s,
                     "results": results_out,
                 }
             )
@@ -565,7 +572,17 @@ def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
 def _flatten_draws(parsed: dict[str, Any]) -> list[dict]:
     proposals: list[dict] = []
     for d in parsed.get("draws") or []:
-        proposals.extend(d.get("results") or [])
+        lab = d.get("lab_name")
+        lab_s = str(lab).strip() if lab not in (None, "") else ""
+        wp = d.get("workplace")
+        wp_s = str(wp).strip() if wp not in (None, "") else ""
+        for r in d.get("results") or []:
+            row = dict(r)
+            if lab_s:
+                row["proposed_lab_name"] = lab_s
+            if wp_s:
+                row["proposed_workplace"] = wp_s
+            proposals.append(row)
     return filter_proposals(proposals)
 
 
@@ -845,9 +862,13 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
 
         model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
         lab_name = None
+        workplace = None
         for d in parsed.get("draws") or []:
-            if d.get("lab_name"):
+            if not lab_name and d.get("lab_name"):
                 lab_name = d["lab_name"]
+            if not workplace and d.get("workplace"):
+                workplace = d["workplace"]
+            if lab_name and workplace:
                 break
         meta = {
             "engine": "nvidia",
@@ -857,6 +878,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
             "dates": got_dates,
             "discovered_dates": discovered,
             "lab_name": lab_name,
+            "workplace": workplace,
             "warnings": parsed.get("warnings") or [],
         }
         return text, proposals, meta
