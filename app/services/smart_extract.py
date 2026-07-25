@@ -58,7 +58,12 @@ Rules:
 - NEVER extract report header/metadata as results: ČP, IČO, IČP, Plátce, Dg., věk, pohlaví, datum narození, číslo sestavení, číslo průvodky, protokol číslo, přijato, svozová trasa, pracoviště / address lines, "Sestaveno a vydáno", page numbers, accreditation marks (AM), lab site codes (HAD), column headers (Název vyšetření / Výsledek / Jednotka / Meze).
 - Only rows that are real laboratory analytes (biochemistry, hematology, hormones, urine chem, etc.) with a numeric result.
 - Do NOT emit duplicate rows for the same analyte on the same draw date (same marker + same value).
-- When a known catalog code matches, set marker_code exactly (e.g. hgb, glucose, creatinine, alt, ggt, alp, wbc, plt, neutrophils). Otherwise omit marker_code and keep the original label.
+- Marker mapping (CRITICAL — you are the primary matcher):
+  - Analyte names on Czech reports are usually Czech (Hemoglobin, Leukocyty, Kreatinin, Glukóza, Železo, Feritin, Sodík, Draslík, Celková bílkovina, Triacylglyceroly…).
+  - ALWAYS set marker_code to the catalog code when the row matches an entry in the provided catalog list. Omit marker_code ONLY if nothing in the catalog fits.
+  - Never invent codes outside the catalog. Never guess a wrong close code (ALT≠AST, CRP≠hs_crp, neutrophils≠neutrophils_abs).
+  - Use unit + label to choose % vs absolute (e.g. Neutrofily % → neutrophils; Neutrofily abs. počet / 10^9/l → neutrophils_abs).
+  - Keep label exactly as printed on the report (Czech spelling OK).
 - Keep original units from the report; do not invent conversions.
 - Extract EVERY visible lab analyte row (biochemistry + hematology), not just one marker.
 """
@@ -627,8 +632,10 @@ def _build_extract_content(
             {
                 "type": "text",
                 "text": (
-                    "Catalog marker codes (use marker_code when matching): "
-                    + ", ".join(marker_hints[:120])
+                    "CATALOG — map each Czech/English analyte to exactly one marker_code from this list "
+                    "(format code=Czech name). This mapping is your main job; set marker_code whenever "
+                    "possible, omit only if unmatched: "
+                    + ", ".join(marker_hints[:300])
                 ),
             }
         )

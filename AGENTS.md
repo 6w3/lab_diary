@@ -52,4 +52,5 @@ Smart extract:
 
 ## Marker catalog
 
-Extend `MARKER_SEED` + `MARKER_ALIASES` for standard Czech lab abbreviations (e.g. `Barvivo erytr. MCH` → `mch`). Prefer Smart `marker_code` when it exists in catalog via `resolve_marker`.
+Extend `MARKER_SEED` + `MARKER_ALIASES` for standard Czech lab abbreviations (e.g. `Barvivo erytr. MCH` → `mch`).
+**Smart AI is the primary marker mapper** (Czech labels → catalog `marker_code`). Backend trusts a valid Smart `marker_code`; for Smart jobs it does **not** fuzzy-override missing codes (user aliases still apply). Classic OCR still uses fuzzy aliases.

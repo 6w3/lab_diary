@@ -63,6 +63,7 @@ def enrich_proposals(
     catalog: list[Marker],
     *,
     user_aliases: dict[str, str] | None = None,
+    allow_fuzzy: bool = True,
 ) -> list[dict]:
     out: list[dict] = []
     for p in proposals:
@@ -73,6 +74,7 @@ def enrich_proposals(
             catalog,
             code_hint=code,
             user_aliases=user_aliases,
+            allow_fuzzy=allow_fuzzy,
         )
         label = source_label or (matched.name_cs if matched else "")
         unit = normalize_unit(p.get("unit") or "")
@@ -110,7 +112,14 @@ def finalize_job(db: Session, job: ImportJob) -> None:
         all_proposals,
         key=lambda p: (str(p.get("proposed_drawn_on") or ""), str(p.get("label") or "")),
     )
-    enriched = enrich_proposals(all_proposals, catalog, user_aliases=user_aliases)
+    # Smart AI owns marker mapping; do not let OCR heuristics override missing codes.
+    allow_fuzzy = (job.extract_mode or "").lower() != "smart"
+    enriched = enrich_proposals(
+        all_proposals,
+        catalog,
+        user_aliases=user_aliases,
+        allow_fuzzy=allow_fuzzy,
+    )
     enriched = filter_proposals(enriched)
     detected_dates = unique_drawn_dates(enriched)
     detected_lab = (payload.get("detected_lab") or "").strip()
@@ -250,7 +259,11 @@ def process_claimed_attachment(
 ) -> dict[str, Any]:
     """Run extract for a claimed attachment and merge into the job. Returns status info."""
     catalog = db.query(Marker).all()
-    marker_hints = [f"{m.code}={m.name_cs}" for m in catalog]
+    marker_hints = [
+        f"{m.code}={m.name_cs}"
+        + (f"/{m.name_en}" if (m.name_en or "") and m.name_en != m.name_cs else "")
+        for m in catalog
+    ]
     try:
         raw, proposals, meta = extract_file(storage_path, mode, marker_hints)
     except Exception as exc:  # noqa: BLE001

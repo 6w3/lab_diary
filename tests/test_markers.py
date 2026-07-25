@@ -37,6 +37,30 @@ def test_resolve_prefers_code_hint():
     assert m.code == "mpv"
 
 
+def test_resolve_code_hint_case_insensitive():
+    m = resolve_marker("x", _catalog(), code_hint="HGB")
+    assert m is not None
+    assert m.code == "hgb"
+
+
+def test_resolve_smart_skips_fuzzy_without_code():
+    # Without Smart code, fuzzy would match; Smart path must not invent bind.
+    m = resolve_marker("Hemoglobin", _catalog(), allow_fuzzy=False)
+    assert m is None
+
+
+def test_resolve_smart_keeps_user_alias_without_fuzzy():
+    aliases = {normalize_alias_label("Weird lab label"): "ast"}
+    m = resolve_marker(
+        "Weird lab label",
+        _catalog(),
+        user_aliases=aliases,
+        allow_fuzzy=False,
+    )
+    assert m is not None
+    assert m.code == "ast"
+
+
 def test_unknown_stays_unmatched():
     assert match_marker("Super special home assay XYZ99", _catalog()) is None
 
@@ -93,3 +117,38 @@ def test_match_relative_neutrophils():
     m = match_marker("B_Neutrofily", _catalog())
     assert m is not None
     assert m.code == "neutrophils"
+
+
+def test_match_transferrin_sat():
+    m = match_marker("Saturace transferinu", _catalog())
+    assert m is not None
+    assert m.code == "transferrin_sat"
+
+
+def test_match_hs_crp():
+    m = match_marker("hs-CRP", _catalog())
+    assert m is not None
+    assert m.code == "hs_crp"
+
+
+def test_match_nt_pro_bnp():
+    m = match_marker("NT-proBNP", _catalog())
+    assert m is not None
+    assert m.code == "nt_pro_bnp"
+
+
+def test_match_amylase():
+    m = match_marker("S_Amyláza", _catalog())
+    assert m is not None
+    assert m.code == "amylase"
+
+
+def test_match_ca19_9():
+    m = match_marker("CA 19-9", _catalog())
+    assert m is not None
+    assert m.code == "ca19_9"
+
+
+def test_seed_codes_unique():
+    codes = [m["code"] for m in MARKER_SEED]
+    assert len(codes) == len(set(codes))
