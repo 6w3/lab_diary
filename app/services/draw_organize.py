@@ -23,6 +23,16 @@ def link_attachment_to_draw(db, draw_id: int, attachment_id: int) -> None:
         )
         .first()
     )
+    # Same merge/move batch may link the same pair multiple times before flush
+    if existing is None:
+        for obj in getattr(db, "new", ()) or ():
+            if (
+                isinstance(obj, DrawAttachment)
+                and obj.blood_draw_id == draw_id
+                and obj.attachment_id == attachment_id
+            ):
+                existing = obj
+                break
     if existing:
         return
     db.add(DrawAttachment(blood_draw_id=draw_id, attachment_id=attachment_id))

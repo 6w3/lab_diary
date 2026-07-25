@@ -235,3 +235,29 @@ def test_merge_draw_same_noop():
         target_draw_id=3,
     )
     assert (moved, skipped, deleted) == (0, 0, False)
+
+
+def test_link_attachment_dedupes_pending_new():
+    from app.models import DrawAttachment
+    from app.services.draw_organize import link_attachment_to_draw
+
+    class DB:
+        def __init__(self):
+            self.added = []
+            self.new = set()
+
+        def query(self, model):
+            return _FakeQuery([])
+
+        def add(self, obj):
+            self.added.append(obj)
+            self.new.add(obj)
+
+    db = DB()
+    link_attachment_to_draw(db, 101, 30)
+    link_attachment_to_draw(db, 101, 30)
+    link_attachment_to_draw(db, 101, 30)
+    assert len(db.added) == 1
+    assert isinstance(db.added[0], DrawAttachment)
+    assert db.added[0].blood_draw_id == 101
+    assert db.added[0].attachment_id == 30
