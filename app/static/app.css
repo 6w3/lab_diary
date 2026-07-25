@@ -170,6 +170,51 @@ th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: le
   text-align: center;
   padding: 1.5rem;
 }
+.dropzone {
+  position: relative;
+  margin: 0.75rem 0;
+  padding: 1.25rem 1rem;
+  border: 2px dashed var(--border);
+  background: var(--bg, #fff);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.dropzone:hover,
+.dropzone.is-dragover {
+  border-color: var(--accent);
+  background: #f0f6ff;
+}
+.dropzone input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.dropzone-title {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+}
+.dropzone-hint {
+  margin: 0;
+}
+.dropzone-files {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  text-align: left;
+  font-size: 0.92rem;
+}
+.dropzone-files li {
+  padding: 0.15rem 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @media (max-width: 640px) {
   .top { flex-direction: column; align-items: flex-start; }
 }

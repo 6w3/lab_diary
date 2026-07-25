@@ -92,9 +92,15 @@ def health():
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, locale: LocaleDep, user: OptionalUserDep):
+    if user is not None:
+        if not user.email_verified:
+            return RedirectResponse(url="/auth/verify-pending", status_code=303)
+        return RedirectResponse(url="/draws", status_code=303)
     return templates.TemplateResponse(
         request,
-        "home.html", template_context(request, locale))
+        "home.html",
+        template_context(request, locale),
+    )
 
 
 @app.post("/locale")

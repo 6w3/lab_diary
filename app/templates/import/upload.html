@@ -8,9 +8,20 @@
   <label>{{ t('lab_name') }}
     <input type="text" name="lab_name" placeholder="{{ t('optional') }}">
   </label>
-  <label>{{ t('upload') }}
-    <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
-  </label>
+  <div
+    class="dropzone"
+    id="import-dropzone"
+    data-max-files="{{ max_import_files }}"
+    data-label-drop="{{ t('drop_files_here') }}"
+    data-label-or="{{ t('or_click_to_browse') }}"
+    data-label-selected="{{ t('files_selected') }}"
+    data-label-too-many="{{ t('files_too_many', max=max_import_files) }}"
+  >
+    <input type="file" name="files" id="import-files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
+    <p class="dropzone-title" id="dropzone-title">{{ t('drop_files_here') }}</p>
+    <p class="muted dropzone-hint">{{ t('or_click_to_browse') }}</p>
+    <ul class="dropzone-files" id="dropzone-files" hidden></ul>
+  </div>
   <p class="muted">{{ t('upload_batch_hint', max=max_import_files) }}</p>
   <fieldset class="extract-mode">
     <legend>{{ t('extract_mode') }}</legend>
@@ -40,7 +51,85 @@
 (function () {
   const form = document.getElementById("import-upload-form");
   const overlay = document.getElementById("upload-overlay");
-  if (!form || !overlay) return;
+  const zone = document.getElementById("import-dropzone");
+  const input = document.getElementById("import-files");
+  const title = document.getElementById("dropzone-title");
+  const list = document.getElementById("dropzone-files");
+  if (!form || !overlay || !zone || !input) return;
+
+  const maxFiles = parseInt(zone.dataset.maxFiles || "40", 10);
+  const accept = (input.getAttribute("accept") || "")
+    .split(",")
+    .map(function (s) { return s.trim().toLowerCase(); })
+    .filter(Boolean);
+
+  function extOk(file) {
+    const name = (file.name || "").toLowerCase();
+    const dot = name.lastIndexOf(".");
+    if (dot < 0) return false;
+    const ext = name.slice(dot);
+    return accept.length === 0 || accept.indexOf(ext) >= 0;
+  }
+
+  function renderFiles(files) {
+    const arr = Array.from(files || []);
+    if (!arr.length) {
+      title.textContent = zone.dataset.labelDrop || "";
+      list.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    title.textContent = (zone.dataset.labelSelected || "").replace("{n}", String(arr.length));
+    list.hidden = false;
+    list.innerHTML = arr.map(function (f) {
+      return "<li>" + f.name.replace(/[<>&]/g, function (c) {
+        return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
+      }) + "</li>";
+    }).join("");
+  }
+
+  function setFiles(fileList) {
+    const picked = Array.from(fileList || []).filter(extOk);
+    if (!picked.length) return;
+    if (picked.length > maxFiles) {
+      window.alert(zone.dataset.labelTooMany || "");
+      return;
+    }
+    const dt = new DataTransfer();
+    picked.forEach(function (f) { dt.items.add(f); });
+    input.files = dt.files;
+    renderFiles(input.files);
+  }
+
+  zone.addEventListener("click", function (e) {
+    if (e.target === input) return;
+    input.click();
+  });
+
+  input.addEventListener("change", function () {
+    renderFiles(input.files);
+  });
+
+  ["dragenter", "dragover"].forEach(function (ev) {
+    zone.addEventListener(ev, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add("is-dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    zone.addEventListener(ev, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove("is-dragover");
+    });
+  });
+  zone.addEventListener("drop", function (e) {
+    if (e.dataTransfer && e.dataTransfer.files) {
+      setFiles(e.dataTransfer.files);
+    }
+  });
+
   form.addEventListener("submit", function () {
     overlay.hidden = false;
     const btn = form.querySelector('button[type="submit"]');
