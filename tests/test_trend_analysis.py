@@ -155,8 +155,9 @@ def test_analyze_trends_includes_user_focus():
     ) as chat:
         analyze_trends(payload, locale="cs", user_focus="zaměř se na ferritin a únavu")
     prompt = chat.call_args.args[0][0]["text"]
-    assert "User focus" in prompt
+    assert "User focus" in prompt or "long-term health" in prompt
     assert "ferritin a únavu" in prompt
+    assert "Do NOT write long sections" in prompt or "Prioritize" in prompt
 
 
 def test_analyze_trends_rejects_empty_nvidia():

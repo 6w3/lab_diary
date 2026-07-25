@@ -38,7 +38,7 @@ When the user gives **durable** process/product instructions (deploy, scope, uni
 
 ## Stack (short)
 
-FastAPI + Jinja/HTMX + Chart.js + MariaDB + Alembic. OCR classic (pdfplumber → RapidOCR/Tesseract) + Smart (`app/services/smart_extract.py`).
+FastAPI + Jinja/HTMX + Chart.js + MariaDB + Alembic. OCR classic (pdfplumber → RapidOCR/Tesseract) + Smart (`app/services/smart_extract.py`). Favicon = Behej srdcem heart-track mark (`app/static/favicon.*` from official „pouze srdce“ logo).
 
 ## Deploy / git with VPS
 
@@ -65,7 +65,7 @@ Upload is **import-first** (`/import`): one batch can create/extend multiple dra
 2. **Odběry** (`/import/{id}/review`) — merge by date, edit/confirm. Back link to Soubory.
 Confirm drops by proposal `uid`. After conditions wizard, return via `import_continue_url`.
 
-**Trends / Výsledky**: charts + table + **Analýza** tab — NVIDIA text summary of all confirmed results (lab/tip refs + draw conditions). Optional user focus prompt; button + consent; analyses stored as history under `upload_dir/trend_analysis/` (newest first; latest prominent, older in `<details>`); educational only (**not** a diagnosis).
+**Trends / Výsledky**: charts + table + **Analýza** tab — NVIDIA summary of confirmed results. Lens = **long-term health**; prioritize attention items (out of range / worsening); skip fluff on normals. Optional user focus; history under `upload_dir/trend_analysis/` (newest first); educational only (**not** a diagnosis).
 
 Smart extract:
 

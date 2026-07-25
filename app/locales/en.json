@@ -113,7 +113,7 @@
   "trends_tab_table": "Table",
   "trends_tab_analysis": "Analysis",
   "trends_table_hint": "All values in canonical units (same as charts). Lab = report range, tip = guide band. Date links to the draw.",
-  "trends_analysis_hint": "AI reviews all confirmed results (including lab/tip ranges and draw conditions) and writes a detailed health-oriented summary of your data.",
+  "trends_analysis_hint": "AI focuses on long-term health and what deserves attention (out of range, worsening trends). If things look fine, keep it short — no fluff.",
   "trends_analysis_disclaimer": "This is not a medical diagnosis or treatment advice. The summary is educational — always decide with a clinician.",
   "trends_analysis_consent": "I agree to send my confirmed lab results to NVIDIA NIM for analysis.",
   "trends_analysis_consent_required": "Consent to send data to NVIDIA is required for analysis.",

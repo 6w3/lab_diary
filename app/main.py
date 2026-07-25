@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -83,6 +83,11 @@ def on_shutdown() -> None:
     from app.services.import_worker import stop_import_worker
 
     stop_import_worker()
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon_ico():
+    return FileResponse(static_dir / "favicon.ico", media_type="image/x-icon")
 
 
 @app.get("/health")

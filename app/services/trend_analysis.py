@@ -12,8 +12,14 @@ from app.services.smart_extract import _nvidia_chat, smart_enabled
 from app.services.storage import ensure_upload_dir
 
 ANALYSIS_SYSTEM = (
-    "You are a careful health educator summarizing personal laboratory trends. "
+    "You are a careful health educator summarizing personal laboratory trends "
+    "with a long-term health lens (cardiometabolic, liver/kidney, iron, inflammation, "
+    "hormones when present — not a full marker-by-marker inventory). "
     "Write clear, structured prose for a non-clinician. "
+    "Be selective and concise: spend words only on what deserves attention "
+    "(out of range, worsening trends, clinically meaningful patterns). "
+    "If markers look fine, say so in one short sentence — do not elaborate. "
+    "Skip fluff, filler reassurance, and exhaustive lists of normal values. "
     "You are NOT a doctor: never diagnose, prescribe, or claim certainty. "
     "Prefer cautious language (may suggest, worth discussing with a clinician). "
     "Use light markdown: ## headings, bullet lists, short paragraphs. "
@@ -132,18 +138,19 @@ def _user_prompt(payload: list[dict], *, locale: str, user_focus: str | None = N
     focus_block = ""
     if focus:
         focus_block = (
-            "\nUser focus (prioritize this; still cover the rest briefly):\n"
+            "\nUser focus (prioritize if it matters for long-term health; "
+            "still skip fluff on unrelated normals):\n"
             f"{focus}\n"
         )
-    return f"""Analyze these confirmed personal lab results and write a detailed educational summary in {lang}.
+    return f"""Write a focused educational summary of these confirmed personal lab results in {lang}.
+
+Primary lens: long-term health (what may matter over months/years), not a tour of every analyte.
 {focus_block}
-Cover:
-1. Overall picture (what looks stable vs changing).
-2. Markers outside lab reference and/or tip range — what that often means in general terms.
-3. Trends over time (rising/falling/flat) where enough points exist.
-4. Context from draw conditions when present (fasting, illness, training, supplements, notes).
-5. Sensible next steps (what to discuss with a clinician; not a treatment plan).
-6. End with a short reminder that this is not a medical diagnosis.
+Rules:
+- Prioritize: out-of-lab/tip range, clear worsening or rising risk trends, repeated borderline patterns, and draw-condition context when it explains an outlier.
+- Do NOT write long sections about markers that are clearly fine — one short line that the rest looks unremarkable is enough (or omit).
+- No filler: no repeating the same reassurance, no inventory of normal CBC/biochem just to fill space.
+- Structure: (1) short overall take for long-term health, (2) attention items with why they matter, (3) optional next questions for a clinician, (4) one-line disclaimer that this is not a diagnosis.
 
 Data (JSON):
 {data_json}
