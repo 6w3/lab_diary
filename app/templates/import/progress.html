@@ -16,6 +16,34 @@
     <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
   </div>
   <p class="muted" id="progress-count">{{ progress.done }} / {{ progress.total }}</p>
+
+  <div class="file-status-grid" id="progress-file-status">
+    <div class="file-status-block" id="progress-done-box" {% if not progress.file_done %}hidden{% endif %}>
+      <p><strong>{{ t('import_files_done_title') }}</strong></p>
+      <ul class="file-status-list" id="progress-done-list">
+        {% for e in progress.file_done or [] %}
+          <li>{{ e.filename }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="file-status-block" id="progress-running-box" {% if not progress.file_running %}hidden{% endif %}>
+      <p><strong>{{ t('import_files_running_title') }}</strong></p>
+      <ul class="file-status-list" id="progress-running-list">
+        {% for e in progress.file_running or [] %}
+          <li>{{ e.filename }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="file-status-block" id="progress-queued-box" {% if not progress.file_queued %}hidden{% endif %}>
+      <p><strong>{{ t('import_files_queued_title') }}</strong></p>
+      <ul class="file-status-list" id="progress-queued-list">
+        {% for e in progress.file_queued or [] %}
+          <li>{{ e.filename }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
   <div class="card error-box" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
     <p class="muted" id="progress-retry-hint">{{ t('import_retry_while_running_hint') }}</p>
@@ -58,6 +86,12 @@
   const retryAllForm = document.getElementById("progress-retry-all");
   const actionsEl = document.getElementById("progress-actions");
   const bar = root.querySelector(".progress-bar");
+  const doneBox = document.getElementById("progress-done-box");
+  const doneList = document.getElementById("progress-done-list");
+  const runningBox = document.getElementById("progress-running-box");
+  const runningList = document.getElementById("progress-running-list");
+  const queuedBox = document.getElementById("progress-queued-box");
+  const queuedList = document.getElementById("progress-queued-list");
   let stopped = false;
   let timer = null;
 
@@ -65,6 +99,20 @@
     return String(s || "").replace(/[<>&]/g, function (c) {
       return ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[c];
     });
+  }
+
+  function renderNameList(box, listEl, items) {
+    if (!box || !listEl) return;
+    const list = Array.isArray(items) ? items : [];
+    if (!list.length) {
+      box.hidden = true;
+      listEl.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    listEl.innerHTML = list.map(function (e) {
+      return "<li>" + esc(e.filename || "file") + "</li>";
+    }).join("");
   }
 
   function renderFileErrors(errors) {
@@ -99,6 +147,9 @@
     if (fillEl) fillEl.style.width = (data.percent || 0) + "%";
     if (bar) bar.setAttribute("aria-valuenow", String(data.percent || 0));
     if (countEl) countEl.textContent = (data.done || 0) + " / " + (data.total || 0);
+    renderNameList(doneBox, doneList, data.file_done);
+    renderNameList(runningBox, runningList, data.file_running);
+    renderNameList(queuedBox, queuedList, data.file_queued);
     renderFileErrors(data.file_errors);
     if (data.status === "review" && data.review_url) {
       stopped = true;

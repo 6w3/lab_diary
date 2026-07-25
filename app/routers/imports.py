@@ -119,6 +119,19 @@ def import_form(request: Request, locale: LocaleDep, user: UserDep):
     )
 
 
+def _progress_file_entry(att: Attachment, atts: list[Attachment], total: int) -> dict:
+    pos = next((i + 1 for i, x in enumerate(atts) if x.id == att.id), None)
+    return {
+        "attachment_id": att.id,
+        "filename": attachment_display_name(att, index=pos, total=total),
+        "original_filename": (att.original_filename or "").strip() or None,
+        "stored_filename": att.filename,
+        "index": pos,
+        "total": total,
+        "status": att.ocr_status,
+    }
+
+
 def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
     from app.i18n import t as i18n_t
 
@@ -129,19 +142,31 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         .all()
     )
     total = len(atts)
+    done_atts = [a for a in atts if a.ocr_status == "done"]
     failed_atts = [a for a in atts if a.ocr_status == "failed"]
-    done_ok = sum(1 for a in atts if a.ocr_status == "done")
+    processing_atts = [a for a in atts if a.ocr_status == "processing"]
+    pending_atts = [a for a in atts if a.ocr_status == "pending"]
+    done_ok = len(done_atts)
     done = sum(1 for a in atts if a.ocr_status in {"done", "failed", "skipped"})
-    running = sum(1 for a in atts if a.ocr_status in {"pending", "processing"})
-    current = next((a for a in atts if a.ocr_status == "processing"), None)
-    if current is None:
-        current = next((a for a in atts if a.ocr_status == "pending"), None)
-    current_idx = None
-    if current is not None:
-        current_idx = next((i + 1 for i, a in enumerate(atts) if a.id == current.id), None)
+    running = len(processing_atts)
+    queued = len(pending_atts)
+    unfinished = running + queued
+
+    file_done = [_progress_file_entry(a, atts, total) for a in done_atts]
+    file_running = [_progress_file_entry(a, atts, total) for a in processing_atts]
+    file_queued = [_progress_file_entry(a, atts, total) for a in pending_atts]
+
+    current = processing_atts[0] if processing_atts else (pending_atts[0] if pending_atts else None)
     filename = (
-        attachment_display_name(current, index=current_idx, total=total) if current else ""
+        attachment_display_name(
+            current,
+            index=next((i + 1 for i, a in enumerate(atts) if a.id == current.id), None),
+            total=total,
+        )
+        if current
+        else ""
     )
+    running_names = ", ".join(e["filename"] for e in file_running)
 
     payload = {}
     try:
@@ -154,17 +179,12 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         by_id = {e.get("attachment_id"): e for e in file_errors if e.get("attachment_id")}
         rebuilt = []
         for a in failed_atts:
-            pos = next((i + 1 for i, x in enumerate(atts) if x.id == a.id), None)
+            entry = _progress_file_entry(a, atts, total)
             prev = by_id.get(a.id) or {}
             rebuilt.append(
                 {
                     **prev,
-                    "attachment_id": a.id,
-                    "filename": attachment_display_name(a, index=pos, total=total),
-                    "original_filename": (a.original_filename or "").strip() or None,
-                    "stored_filename": a.filename,
-                    "index": pos,
-                    "total": total,
+                    **entry,
                     "error": prev.get("error") or (a.ocr_raw_text or "failed")[:500],
                 }
             )
@@ -174,13 +194,31 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         message = i18n_t(locale, "import_progress_done")
     elif job.status == "failed":
         message = i18n_t(locale, "import_progress_failed")
-    elif failed_atts and running:
+    elif failed_atts and unfinished:
+        if queued:
+            message = i18n_t(
+                locale,
+                "import_progress_partial_queued",
+                done=str(done_ok),
+                failed=str(len(failed_atts)),
+                running=str(running),
+                queued=str(queued),
+            )
+        else:
+            message = i18n_t(
+                locale,
+                "import_progress_partial",
+                done=str(done_ok),
+                failed=str(len(failed_atts)),
+                running=str(running),
+            )
+    elif running > 1:
         message = i18n_t(
             locale,
-            "import_progress_partial",
-            done=str(done_ok),
-            failed=str(len(failed_atts)),
+            "import_progress_files_running",
             running=str(running),
+            total=str(total),
+            filenames=running_names,
         )
     elif current:
         message = i18n_t(
@@ -204,12 +242,17 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         "done": done,
         "done_ok": done_ok,
         "failed": len(failed_atts),
+        "running": running,
+        "queued": queued,
         "total": total,
         "percent": int(round(100 * done / total)) if total else 0,
         "current_file": filename,
         "message": message,
         "review_url": f"/import/{job.id}/review" if job.status == "review" else None,
         "error": error,
+        "file_done": file_done,
+        "file_running": file_running,
+        "file_queued": file_queued,
         "file_errors": file_errors,
         "server_queue": True,
     }
