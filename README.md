@@ -20,7 +20,7 @@ Osobní laboratorní deník: odběry, podmínky, upload reportů, OCR, strukturo
 | **Classic** | VPS | free, data stays local |
 | **Smart** | NVIDIA NIM | needs consent; better for photos / multi-date tables |
 
-Set in `.env`: `NVIDIA_API_KEY`, `SMART_MODEL=nvidia/nemotron-nano-12b-v2-vl`, `OCR_ENGINE=auto|rapid|tesseract`.
+Set in `.env`: `NVIDIA_API_KEY`, `SMART_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`, `OCR_ENGINE=auto|rapid|tesseract`.
 
 Optional RapidOCR: `pip install 'lab-diary[ocr-rapid]'`.
 

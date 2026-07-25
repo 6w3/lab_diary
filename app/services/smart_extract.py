@@ -75,12 +75,18 @@ layout:
 - "unknown" if unclear.
 
 dates:
+- Look at DATE COLUMN HEADERS above the numeric value grid (often near top of the results table), not only the page print/Tisk stamp.
 - For multi_column: list EVERY result-column header date (ISO YYYY-MM-DD). Never drop older columns.
 - For single: list at most ONE preferred sample date ("Datum odběru"), else the lab result date. Do NOT list every calendar day.
 - Czech dates are day-first; spaces after dots are OK.
 - Do NOT invent dates. Do NOT expand into a consecutive day range.
 - IGNORE: print/Tisk timestamps, birth dates / rodné číslo, appointment notes, diagnoses, prescription dates, unrelated visit notes below the lab panel.
 """
+
+JSON_ONLY_SYSTEM = (
+    "You are a JSON extraction API for laboratory reports. "
+    "Output a single JSON object only. No markdown fences, no analysis, no chain-of-thought."
+)
 
 SINGLE_DRAW_HINT = """
 This image is a SINGLE-DRAW lab panel / EHR screenshot (not a multi-column history table).
@@ -305,10 +311,14 @@ def _save_vision_jpeg(img: Image.Image, dest: Path) -> None:
 
 def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
     settings = get_settings()
-    model = settings.smart_model or "nvidia/nemotron-nano-12b-v2-vl"
+    model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": content}],
+        # System message keeps reasoning/omni models from dumping chain-of-thought into content.
+        "messages": [
+            {"role": "system", "content": JSON_ONLY_SYSTEM},
+            {"role": "user", "content": content},
+        ],
         "max_tokens": max_tokens,
         "temperature": 0.1,
     }
@@ -317,12 +327,18 @@ def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
         "Accept": "application/json",
         "Content-Type": "application/json",
     }
-    with httpx.Client(timeout=180.0) as client:
+    # Omni/reasoning VLMs are slower than nano-12b on dense tables.
+    with httpx.Client(timeout=240.0) as client:
         resp = client.post(f"{NVIDIA_BASE}/chat/completions", headers=headers, json=payload)
         if resp.status_code >= 400:
             raise RuntimeError(f"NVIDIA API {resp.status_code}: {resp.text[:500]}")
         body = resp.json()
-    return body["choices"][0]["message"]["content"]
+    msg = body["choices"][0]["message"]
+    text = msg.get("content") or ""
+    if not str(text).strip() and msg.get("reasoning_content"):
+        # Fallback if provider puts final answer only in reasoning_content.
+        text = msg.get("reasoning_content") or ""
+    return text
 
 
 def _image_content(pages: list[Path]) -> list[dict]:
@@ -513,7 +529,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
             parsed = {"draws": [], "warnings": ["hallucinated_extract_discarded"]}
             got_dates = []
 
-        model = settings.smart_model or "nvidia/nemotron-nano-12b-v2-vl"
+        model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
         lab_name = None
         for d in parsed.get("draws") or []:
             if d.get("lab_name"):

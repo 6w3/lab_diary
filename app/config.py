@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # Smart extract (NVIDIA NIM only)
     nvidia_api_key: str = ""
     smart_provider: str = "nvidia"
-    smart_model: str = "nvidia/nemotron-nano-12b-v2-vl"
+    smart_model: str = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 
     brevo_api_key: str = ""
     brevo_sender_email: str = "noreply@lab.behejsrdcem.cz"

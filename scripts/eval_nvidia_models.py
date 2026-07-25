@@ -22,6 +22,8 @@ sys.path.insert(0, str(ROOT))
 from PIL import Image, ImageDraw, ImageFont  # noqa: E402
 
 CANDIDATES = [
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+    "meta/llama-3.2-90b-vision-instruct",
     "nvidia/nemotron-nano-12b-v2-vl",
     "meta/llama-3.2-11b-vision-instruct",
     "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
