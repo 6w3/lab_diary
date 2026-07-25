@@ -4,6 +4,7 @@ from app.services.multi_date import unique_drawn_dates
 from app.services.smart_extract import (
     _extract_json,
     _is_consecutive_day_run,
+    _looks_like_collapsed_multi_dates,
     _looks_like_history_columns,
     _message_text,
     _sanitize_discovered_dates,
@@ -49,7 +50,21 @@ def test_two_close_dates_still_single():
     # Same-week revisit is not a history table
     dates = ["2024-06-07", "2024-06-14"]
     assert not _looks_like_history_columns(dates)
+    assert _looks_like_collapsed_multi_dates(dates)
     assert _sanitize_discovered_dates(dates, layout="single") == ["2024-06-07"]
+    # Must NOT accept as multi_column (day/month-swap hallucination pattern)
+    assert _sanitize_discovered_dates(dates, layout="multi_column") == []
+    assert _sanitize_discovered_dates(["2020-10-14", "2020-10-18"], layout="multi_column") == []
+    assert _sanitize_discovered_dates(["2020-10-14", "2020-10-18"], layout="unknown") == [
+        "2020-10-14"
+    ]
+
+
+def test_pribram_three_columns_kept():
+    dates = ["2020-10-14", "2016-05-18", "2010-09-14"]
+    assert _looks_like_history_columns(dates)
+    assert not _looks_like_collapsed_multi_dates(dates)
+    assert _sanitize_discovered_dates(dates, layout="multi_column") == dates
 
 
 def test_hallucinated_ferritin_spam():

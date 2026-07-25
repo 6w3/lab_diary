@@ -79,7 +79,10 @@ dates:
 - Look at DATE COLUMN HEADERS above the numeric value grid (often near top of the results table), not only the page print/Tisk stamp.
 - For multi_column: list EVERY result-column header date (ISO YYYY-MM-DD). Never drop older columns.
 - For single: list at most ONE preferred sample date ("Datum odběru"), else the lab result date. Do NOT list every calendar day.
-- Czech dates are day-first; spaces after dots are OK.
+- Czech dates are ALWAYS day-first: D. M. YYYY — first number = day, MIDDLE number = month, last = year.
+  Examples: "14. 10. 2020" → 2020-10-14; "18. 5. 2016" → 2016-05-18; "14. 9. 2010" → 2010-09-14.
+  NEVER swap day/month. NEVER mix day from one column with month/year from another (wrong: 2020-10-18 from "18. 5. 2016").
+- History tables usually span YEARS (different years per column). Do not invent near-duplicate same-month dates.
 - Do NOT invent dates. Do NOT expand into a consecutive day range.
 - IGNORE: print/Tisk timestamps, birth dates / rodné číslo, appointment notes, diagnoses, prescription dates, unrelated visit notes below the lab panel.
 """
@@ -93,7 +96,9 @@ DATE_DISCOVER_SHORT = """
 Return ONLY this tiny JSON (no other text):
 {"layout":"multi_column","dates":["YYYY-MM-DD","YYYY-MM-DD"]}
 List EVERY date COLUMN header above the lab value grid on this Czech report.
-If only one draw, use layout "single" and one date. Czech day-first.
+Czech day-first: D. M. YYYY → YYYY-MM-DD (middle number is MONTH).
+Example: "14. 10. 2020","18. 5. 2016","14. 9. 2010" → ["2020-10-14","2016-05-18","2010-09-14"].
+Never invent 2020-10-18 by mixing columns. If only one draw, layout "single" and one date.
 """
 
 SINGLE_DRAW_HINT = """
@@ -344,6 +349,16 @@ def looks_like_hallucinated_extract(proposals: list[dict]) -> bool:
     return False
 
 
+def _looks_like_collapsed_multi_dates(dates: list[str]) -> bool:
+    """True when VLM labeled multi-column but dates are near-duplicates (day/month swap)."""
+    clean: list[str] = []
+    for raw in dates:
+        iso = _normalize_drawn_on(str(raw))
+        if iso and iso not in clean:
+            clean.append(iso)
+    return len(clean) >= 2 and not _looks_like_history_columns(clean)
+
+
 def _looks_like_history_columns(dates: list[str]) -> bool:
     """True when dates look like multi-year comparison columns, not one draw."""
     parsed: list[date] = []
@@ -382,9 +397,15 @@ def _sanitize_discovered_dates(
         # Unknown layout: never force a consecutive day run into extraction
         if _is_consecutive_day_run(clean) or len(clean) > 8:
             return []
+        # Near-duplicates without year span → keep newest/first only (not fake columns)
+        if _looks_like_collapsed_multi_dates(clean):
+            return clean[:1]
         return clean[:3]
     # multi_column: still reject absurd consecutive calendars (not real lab columns)
     if _is_consecutive_day_run(clean):
+        return []
+    # Near-duplicate same-year pairs (e.g. 2020-10-14 + 2020-10-18) are not history columns.
+    if not _looks_like_history_columns(clean):
         return []
     return clean
 
@@ -426,7 +447,12 @@ def _save_vision_jpeg(img: Image.Image, dest: Path) -> None:
     img.save(dest, "JPEG", quality=92)
 
 
-def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
+def _nvidia_chat(
+    content: list[dict],
+    *,
+    max_tokens: int = 8192,
+    temperature: float = 0.1,
+) -> str:
     settings = get_settings()
     model = settings.smart_model or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     payload = {
@@ -437,7 +463,7 @@ def _nvidia_chat(content: list[dict], *, max_tokens: int = 8192) -> str:
             {"role": "user", "content": content},
         ],
         "max_tokens": max_tokens,
-        "temperature": 0.1,
+        "temperature": temperature,
         # Nemotron omni/reasoning otherwise fills the budget with CoT and returns empty content.
         "chat_template_kwargs": {"enable_thinking": False},
     }
@@ -478,7 +504,15 @@ def _finalize_discovery(layout: str, raw_dates: list[Any]) -> tuple[str, list[st
             tentative.append(iso)
     if layout in {"single", "unknown"} and _looks_like_history_columns(tentative):
         layout = "multi_column"
+    # Fake multi (near-duplicate dates) → drop to unknown so caller can retry.
+    if layout == "multi_column" and _looks_like_collapsed_multi_dates(tentative):
+        logger.warning("Rejecting collapsed multi-column dates: %s", tentative)
+        layout = "unknown"
+        dates = _sanitize_discovered_dates(list(raw_dates), layout="unknown")
+        return layout, dates
     dates = _sanitize_discovered_dates(list(raw_dates), layout=layout)
+    if layout == "multi_column" and not dates:
+        layout = "unknown"
     return layout, dates
 
 
@@ -486,22 +520,39 @@ def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
     last_text = ""
     attempts: list[tuple[list[dict], int]] = [
         ([{"type": "text", "text": DATE_DISCOVER_HINT}, *_image_content(pages)], 512),
-        ([{"type": "text", "text": DATE_DISCOVER_SHORT}, *_image_content(pages)], 256),
+        ([{"type": "text", "text": DATE_DISCOVER_SHORT}, *_image_content(pages)], 384),
     ]
+    best: tuple[str, list[str]] | None = None
     for content, max_tokens in attempts:
         try:
-            last_text = _nvidia_chat(content, max_tokens=max_tokens)
+            last_text = _nvidia_chat(content, max_tokens=max_tokens, temperature=0.0)
             data = _extract_json(last_text)
             layout = str(data.get("layout") or "unknown").strip().lower()
-            return _finalize_discovery(layout, list(data.get("dates") or []))
+            layout, dates = _finalize_discovery(layout, list(data.get("dates") or []))
+            if _looks_like_history_columns(dates):
+                return "multi_column", dates
+            if layout == "single" and dates:
+                return layout, dates
+            # Keep partial result but keep trying for real history columns.
+            if dates and (best is None or len(dates) > len(best[1])):
+                best = (layout, dates)
+            if layout == "multi_column" and not _looks_like_history_columns(dates):
+                logger.warning("Date discovery multi without year span: %s — retrying", dates)
+                continue
         except Exception as exc:  # noqa: BLE001
             logger.warning("Date discovery attempt failed: %s", exc)
 
     scraped = _scrape_iso_dates(last_text)
     if scraped:
         layout, dates = _finalize_discovery("unknown", scraped)
-        logger.info("Date discovery recovered via scrape: layout=%s dates=%s", layout, dates)
-        return layout, dates
+        if _looks_like_history_columns(dates):
+            logger.info("Date discovery recovered via scrape: layout=%s dates=%s", layout, dates)
+            return "multi_column", dates
+        if dates and (best is None or len(dates) > len(best[1])):
+            best = (layout, dates)
+            logger.info("Date discovery scrape partial: layout=%s dates=%s", layout, dates)
+    if best:
+        return best
     return "unknown", []
 
 
@@ -617,6 +668,67 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
         proposals = _flatten_draws(parsed)
 
         got_dates = sorted({p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")})
+
+        # Fake multi (e.g. 2020-10-14 + 2020-10-18): re-probe real column headers.
+        if _looks_like_collapsed_multi_dates(got_dates):
+            logger.warning(
+                "Extract dates look collapsed (day/month swap?): %s — re-probing",
+                got_dates,
+            )
+            try:
+                layout2, discovered2 = _discover_dates(pages)
+                if _looks_like_history_columns(discovered2):
+                    layout, discovered = "multi_column", discovered2
+                    content_fix = _build_extract_content(
+                        pages,
+                        marker_hints=marker_hints,
+                        layout=layout,
+                        discovered=discovered,
+                    )
+                    text_fix = _nvidia_chat(content_fix, max_tokens=8192)
+                    parsed_fix = _validate_smart_payload(_extract_json(text_fix))
+                    props_fix = _flatten_draws(parsed_fix)
+                    got_fix = sorted(
+                        {
+                            p.get("proposed_drawn_on")
+                            for p in props_fix
+                            if p.get("proposed_drawn_on")
+                        }
+                    )
+                    if _looks_like_history_columns(got_fix):
+                        text, proposals, parsed = text_fix, props_fix, parsed_fix
+                        got_dates = got_fix
+                    elif props_fix and not _looks_like_collapsed_multi_dates(got_fix):
+                        text, proposals, parsed = text_fix, props_fix, parsed_fix
+                        got_dates = got_fix
+                    else:
+                        # Keep hallucinated pair out of review — prefer empty → classic fallback
+                        # or single newest date from discovery if extract still collapsed.
+                        keep = discovered2[0]
+                        filtered = [p for p in props_fix if p.get("proposed_drawn_on") == keep]
+                        if filtered:
+                            text, proposals, parsed = text_fix, filtered, parsed_fix
+                            got_dates = [keep]
+                            layout = "single"
+                            discovered = [keep]
+                        else:
+                            keep = got_dates[0]
+                            proposals = [p for p in proposals if p.get("proposed_drawn_on") == keep]
+                            got_dates = [keep] if proposals else []
+                            layout = "single"
+                            discovered = [keep]
+                else:
+                    keep = got_dates[0]
+                    proposals = [p for p in proposals if p.get("proposed_drawn_on") == keep]
+                    got_dates = [keep] if proposals else []
+                    layout = "single"
+                    discovered = discovered2[:1] if discovered2 else [keep]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Smart collapsed-date re-probe failed: %s", exc)
+                keep = got_dates[0]
+                proposals = [p for p in proposals if p.get("proposed_drawn_on") == keep]
+                got_dates = [keep] if proposals else []
+                layout = "single"
 
         # If extract collapsed to ≤1 date, re-probe column headers and retry once.
         if len(got_dates) <= 1:
