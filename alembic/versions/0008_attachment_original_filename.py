@@ -16,11 +16,21 @@ branch_labels = None
 depends_on = None
 
 
+def _has_column(table: str, column: str) -> bool:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    return any(col["name"] == column for col in inspector.get_columns(table))
+
+
 def upgrade() -> None:
+    if _has_column("attachments", "original_filename"):
+        return
     with op.batch_alter_table("attachments") as batch:
         batch.add_column(sa.Column("original_filename", sa.String(length=255), nullable=True))
 
 
 def downgrade() -> None:
+    if not _has_column("attachments", "original_filename"):
+        return
     with op.batch_alter_table("attachments") as batch:
         batch.drop_column("original_filename")
