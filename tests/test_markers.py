@@ -192,6 +192,17 @@ def test_match_urine_ph_not_eosinophils():
     assert m.code == "urine_ph"
 
 
+def test_enrich_overrides_stale_ph_code_hint():
+    from app.services.import_process import enrich_proposals
+
+    catalog = _catalog()
+    out = enrich_proposals(
+        [{"label": "pH", "marker_code": "eosinophils_abs", "value": 5.0, "unit": "ph"}],
+        catalog,
+    )
+    assert out[0]["marker_code"] == "urine_ph"
+
+
 def test_match_note_not_potassium():
     assert match_marker("Poznámka k sed.1", _catalog()) is None
 

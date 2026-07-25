@@ -665,8 +665,8 @@ def clean_ocr_label(label: str) -> str:
     return cleaned or raw
 
 
-def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
-    """Map noisy OCR label to catalog marker (exact / alias / contained name)."""
+def match_marker_alias(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
+    """Strong OCR alias / trailing abbreviation hit only (no fuzzy name containment)."""
     if not label or not markers:
         return None
     cleaned = clean_ocr_label(label)
@@ -685,12 +685,10 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
             return by_code[code]
         return None
 
-    # 1) full-label alias (incl. glued OCR like "neutrofilyabs.pocet")
     hit = _from_alias(aliases_folded.get(folded)) or _from_alias(aliases_compact.get(folded_compact))
     if hit:
         return hit
 
-    # 2) multi-word alias first (so "neutrofily abs pocet" wins over "neutrofily")
     for n in (4, 3, 2):
         if len(tokens) >= n:
             for phrase in (" ".join(tokens[-n:]), " ".join(tokens[:n])):
@@ -702,9 +700,6 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
                 if hit:
                     return hit
 
-    # 3) Trailing lab abbreviation (e.g. "Barvivo erytr. MCH" → MCH).
-    # Skip ultra-short tokens in multi-token labels ("k" in notes, "ca" in "Ca 72-4"
-    # without a longer alias hit) — single-token "K"/"Ca"/"Na" still match.
     for tok in reversed(tokens):
         if len(tok) <= 2 and len(tokens) > 1:
             continue
@@ -716,8 +711,22 @@ def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
         for m in markers:
             if tok == _fold(m.code) or tok == _fold(m.name_cs) or tok == _fold(m.name_en):
                 return m
+    return None
 
-    # 4) code / names exact or contained (prefer longer names; prefer *_abs when label has abs)
+
+def match_marker(label: str, markers: list[MarkerLike]) -> MarkerLike | None:
+    """Map noisy OCR label to catalog marker (exact / alias / contained name)."""
+    if not label or not markers:
+        return None
+    strong = match_marker_alias(label, markers)
+    if strong:
+        return strong
+    cleaned = clean_ocr_label(label)
+    folded = _fold(cleaned)
+    folded_compact = re.sub(r"[^a-z0-9]+", "", folded)
+    by_code = {m.code: m for m in markers}
+
+    # Fuzzy: code / names exact or contained (prefer longer names; prefer *_abs when label has abs)
     prefer_abs = "abs" in folded_compact
     candidates: list[tuple[int, MarkerLike]] = []
     for m in markers:

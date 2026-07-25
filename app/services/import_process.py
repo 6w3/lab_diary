@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Attachment, ImportJob, Marker
 from app.services.label_aliases import load_user_aliases
-from app.services.markers import resolve_marker
 from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_dates
 from app.services.ocr_extract import extract_document
 from app.services.ocr_parse import normalize_unit
@@ -66,17 +65,24 @@ def enrich_proposals(
     user_aliases: dict[str, str] | None = None,
     allow_fuzzy: bool = True,
 ) -> list[dict]:
+    from app.services.markers import match_marker_alias, resolve_marker
+
     out: list[dict] = []
     for p in proposals:
         code = (p.get("marker_code") or "").strip() or None
         source_label = (p.get("label") or "").strip()
-        matched = resolve_marker(
-            source_label,
-            catalog,
-            code_hint=code,
-            user_aliases=user_aliases,
-            allow_fuzzy=allow_fuzzy,
-        )
+        # Strong OCR alias beats a stale/wrong persisted code_hint (e.g. pH→eosinophils).
+        strong = match_marker_alias(source_label, catalog) if source_label else None
+        if strong:
+            matched = strong
+        else:
+            matched = resolve_marker(
+                source_label,
+                catalog,
+                code_hint=code,
+                user_aliases=user_aliases,
+                allow_fuzzy=allow_fuzzy,
+            )
         label = source_label or (matched.name_cs if matched else "")
         unit = normalize_unit(p.get("unit") or "")
         if matched and not unit:
