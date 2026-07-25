@@ -78,6 +78,21 @@ def _split_row(line: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+_PRINT_META_RE = re.compile(
+    r"(?i)\b(tisk|tištěno|vystaveno|sestaveno|strana\s*\d|page\s*\d)\b"
+)
+
+
+def _unique_dates(dates: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for d in dates:
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return out
+
+
 def _parse_data_row_for_dates(line: str, n_dates: int) -> dict[str, Any] | None:
     """Parse 'Label  v1 v2 v3  low-high  unit' style rows."""
     raw = line.strip()
@@ -87,9 +102,10 @@ def _parse_data_row_for_dates(line: str, n_dates: int) -> dict[str, Any] | None:
     if find_dates_in_text(raw) and not _NUM_FIND_RE.search(re.sub(_DATE_FIND_RE, " ", raw)):
         return None
 
-    # Label = leading non-numeric words until we hit a run of numbers for values
-    # Strategy: find all numbers; if enough for dates (+ optional ref), use them.
-    nums = list(_NUM_FIND_RE.finditer(raw))
+    # Prefer numbers BEFORE reference range (avoids stealing ref as a date column).
+    rm = _REF_FIND_RE.search(raw)
+    value_span = raw[: rm.start()] if rm else raw
+    nums = list(_NUM_FIND_RE.finditer(value_span))
     if len(nums) < n_dates:
         return None
 
@@ -104,16 +120,15 @@ def _parse_data_row_for_dates(line: str, n_dates: int) -> dict[str, Any] | None:
         return None
 
     values_list = [float(n.group(0).replace(",", ".")) for n in nums[:n_dates]]
-    rest = raw[nums[n_dates - 1].end() :]
     ref_low = ref_high = None
-    rm = _REF_FIND_RE.search(rest)
     if rm:
         ref_low = float(rm.group(1).replace(",", "."))
         ref_high = float(rm.group(2).replace(",", "."))
 
     # unit: trailing token with letter or /
     unit = ""
-    unit_m = re.search(r"([a-zA-Zμµ%°][a-zA-Z0-9μµ/%^.\-]*)\s*$", rest)
+    unit_region = raw[rm.end() :] if rm else raw[nums[n_dates - 1].end() :]
+    unit_m = re.search(r"([a-zA-Zμµ%°][a-zA-Z0-9μµ/%^.\-]*)\s*$", unit_region)
     if unit_m and not _NUM_RE.match(unit_m.group(1).replace(",", ".")):
         unit = unit_m.group(1)
 
@@ -124,6 +139,25 @@ def _parse_data_row_for_dates(line: str, n_dates: int) -> dict[str, Any] | None:
         "lab_ref_high": ref_high,
         "values_list": values_list,
     }
+
+
+def _rows_after_header(lines: list[str], header_idx: int, dates: list[str]) -> list[dict]:
+    rows_out: list[dict] = []
+    for line in lines[header_idx + 1 :]:
+        parsed_row = _parse_data_row_for_dates(line, len(dates))
+        if not parsed_row:
+            continue
+        values = {dates[k]: parsed_row["values_list"][k] for k in range(len(dates))}
+        rows_out.append(
+            {
+                "label": parsed_row["label"],
+                "unit": parsed_row["unit"],
+                "lab_ref_low": parsed_row["lab_ref_low"],
+                "lab_ref_high": parsed_row["lab_ref_high"],
+                "values": values,
+            }
+        )
+    return rows_out
 
 
 def parse_multi_date_table(text: str) -> dict[str, Any] | None:
@@ -143,53 +177,52 @@ def parse_multi_date_table(text: str) -> dict[str, Any] | None:
     if len(lines) < 2:
         return None
 
+    # Scan whole doc: noisy photo OCR often has 15+ junk lines before date headers
+    # (e.g. Příbram HTO comparison tables). Pick candidate with most parseable rows.
+    best: dict[str, Any] | None = None
+    best_n = 0
+    for i, line in enumerate(lines):
+        found = _unique_dates(find_dates_in_text(line))
+        if len(found) < 2:
+            continue
+        if _PRINT_META_RE.search(line) and "název" not in line.lower() and "metody" not in line.lower():
+            continue
+        rows_out = _rows_after_header(lines, i, found)
+        if len(rows_out) > best_n:
+            best_n = len(rows_out)
+            best = {"dates": found, "rows": rows_out}
+            if best_n >= 4:
+                break
+
+    if best and best_n >= 2:
+        return best
+
+    # Fallback: token-based header (legacy compact dates)
+    date_cols: list[tuple[int, str]] = []
     header_idx = None
     dates: list[str] = []
-    # Prefer a line with ≥2 dates (comparison table headers).
-    for i, line in enumerate(lines[:15]):
-        found = find_dates_in_text(line)
-        if len(found) >= 2:
+    for i, line in enumerate(lines[:40]):
+        parts = _split_row(line)
+        found_cols: list[tuple[int, str]] = []
+        for j, p in enumerate(parts):
+            iso = _parse_date_token(p)
+            if iso:
+                found_cols.append((j, iso))
+        uniq = _unique_dates([d for _, d in found_cols])
+        if len(uniq) >= 2:
             header_idx = i
-            dates = found
+            dates = uniq
+            # keep first occurrence column index per date
+            seen: set[str] = set()
+            date_cols = []
+            for j, d in found_cols:
+                if d not in seen:
+                    seen.add(d)
+                    date_cols.append((j, d))
             break
     if header_idx is None:
-        # Fallback: token-based header (legacy compact dates)
-        date_cols: list[tuple[int, str]] = []
-        for i, line in enumerate(lines[:8]):
-            parts = _split_row(line)
-            found_cols: list[tuple[int, str]] = []
-            for j, p in enumerate(parts):
-                iso = _parse_date_token(p)
-                if iso:
-                    found_cols.append((j, iso))
-            if len(found_cols) >= 2:
-                header_idx = i
-                dates = [d for _, d in found_cols]
-                date_cols = found_cols
-                break
-        if header_idx is None:
-            return None
-        return _parse_legacy_column_indexed(lines, header_idx, dates, date_cols)
-
-    rows_out: list[dict] = []
-    for line in lines[header_idx + 1 :]:
-        parsed_row = _parse_data_row_for_dates(line, len(dates))
-        if not parsed_row:
-            continue
-        values = {dates[k]: parsed_row["values_list"][k] for k in range(len(dates))}
-        rows_out.append(
-            {
-                "label": parsed_row["label"],
-                "unit": parsed_row["unit"],
-                "lab_ref_low": parsed_row["lab_ref_low"],
-                "lab_ref_high": parsed_row["lab_ref_high"],
-                "values": values,
-            }
-        )
-
-    if len(rows_out) < 2:
         return None
-    return {"dates": dates, "rows": rows_out}
+    return _parse_legacy_column_indexed(lines, header_idx, dates, date_cols)
 
 
 def _parse_legacy_column_indexed(

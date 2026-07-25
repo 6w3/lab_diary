@@ -65,6 +65,67 @@ AST   0.35   0.32   0.28   0.1 - 0.85   ukat/l
     }
 
 
+def test_pribram_noisy_ocr_header_past_line_15():
+    """Photo OCR: junk header lines push date columns past the old 15-line scan window."""
+    text = """
+d
+/ o
+. e 2
+e 1 o
+A
+0 U e
+<
+Laboratore HTO ON Pribram
+T4 OBLASTNI NEMOCNICE
+Transfuzni lab.: 318 641 406
+FLIN PRIBRAM, a. s.
+prim. MUDr. Magda Nohejlova
+strana 1 /1 Tisk: 14. 10. 2020 12:36:42
+Rodne cislo: 8606254679 Vek: 34
+Jmeno: Vaclavik Jiri
+Dg: 110 H169 ZP:111
+OpenLIMS STAPRO s. r. o.
+- 14. 10. 2020 18. 5. 2016
+Nazev metody 1215 e Hodnoceni Ref. meze Rozmer
+# Leukocyty WBC 5,5 4,9 j5 el o | 4,0-10,0 10^9/l
+# Erytrocyty RBC 5,13 4,80 g A ] 4,00 - 5,80 10^12/l
+# Hemoglobin HGB 160 151 b lX 135 - 175 g/l
+# Hematokrit HCT 0,450 0,418 o ) 0,400 - 0,500 1
+# Stř.obj.eryt. MCV 87,7 87,1 sl 82,0-98,0 fl
+# Trombocyty PLT 209 191 L p I 150 - 400 10^9/l
+"""
+    parsed = parse_multi_date_table(text)
+    assert parsed is not None
+    assert parsed["dates"] == ["2020-10-14", "2016-05-18"]
+    flat = flatten_multi_date(parsed)
+    assert len(flat) >= 10
+    by_date = {d: [r for r in flat if r["proposed_drawn_on"] == d] for d in parsed["dates"]}
+    assert len(by_date["2020-10-14"]) >= 5
+    assert len(by_date["2016-05-18"]) >= 5
+    wbc = [r for r in flat if "Leukocyty" in r["label"]]
+    assert {r["proposed_drawn_on"]: r["value"] for r in wbc} == {
+        "2020-10-14": 5.5,
+        "2016-05-18": 4.9,
+    }
+
+
+def test_ref_range_not_stolen_as_date_value():
+    """Incomplete row (one column missing) must not treat ref bounds as values."""
+    text = """
+Název metody   14. 10. 2020   18. 5. 2016   Ref. meze
+Leukocyty WBC   5,5   4,9   4,0 - 10,0   10^9/l
+Hemoglobin HGB   151   135 - 175   g/l
+Trombocyty PLT   209   191   150 - 400   10^9/l
+"""
+    parsed = parse_multi_date_table(text)
+    assert parsed is not None
+    flat = flatten_multi_date(parsed)
+    hgb = [r for r in flat if "Hemoglobin" in r["label"]]
+    assert hgb == []  # only one value before ref → skip
+    plt = {r["proposed_drawn_on"]: r["value"] for r in flat if "Trombocyty" in r["label"]}
+    assert plt == {"2020-10-14": 209.0, "2016-05-18": 191.0}
+
+
 def test_parse_still_works_on_single_lines():
     rows = parse_ocr_lines("TSH 2.1 mIU/l 0.4-4.0")
     assert rows[0]["label"].upper().startswith("TSH")

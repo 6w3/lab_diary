@@ -70,15 +70,16 @@ Task: find draw/sample dates on this Czech lab report or EHR screenshot.
 
 layout:
 - "multi_column" ONLY if there is a historical comparison TABLE with several DATE COLUMNS as headers (each column = another draw).
+  Typical: Czech hospital HTO/biochem printouts (e.g. Příbram OpenLIMS) with dates like "14. 10. 2020 12:15" and "18. 5. 2016 12:45" ABOVE value columns, one marker list, multiple value columns.
 - "single" if this is one visit / one result list (PC DOKTOR, single panel, one "Datum odběru").
 - "unknown" if unclear.
 
 dates:
-- For multi_column: list EVERY result-column header date (ISO YYYY-MM-DD).
+- For multi_column: list EVERY result-column header date (ISO YYYY-MM-DD). Never drop older columns.
 - For single: list at most ONE preferred sample date ("Datum odběru"), else the lab result date. Do NOT list every calendar day.
 - Czech dates are day-first; spaces after dots are OK.
 - Do NOT invent dates. Do NOT expand into a consecutive day range.
-- IGNORE: birth dates / rodné číslo, appointment notes, diagnoses, prescription dates, unrelated visit notes below the lab panel.
+- IGNORE: print/Tisk timestamps, birth dates / rodné číslo, appointment notes, diagnoses, prescription dates, unrelated visit notes below the lab panel.
 """
 
 SINGLE_DRAW_HINT = """

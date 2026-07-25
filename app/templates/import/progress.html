@@ -4,11 +4,11 @@
 <section class="import-progress card" id="import-progress"
          data-job-id="{{ job.id }}"
          data-status="{{ progress.status }}"
-         data-review-url="/import/{{ job.id }}/review"
-         data-max-workers="2">
+         data-review-url="/import/{{ job.id }}/review">
   <h1>{{ t('import_progress_title') }}</h1>
   <div class="spinner" aria-hidden="true"></div>
   <p class="import-progress-status" id="progress-status">{{ progress.message }}</p>
+  <p class="muted">{{ t('import_progress_server_hint') }}</p>
   <div class="progress-bar" role="progressbar"
        aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ progress.percent }}">
     <div class="progress-bar-fill" id="progress-fill" style="width: {{ progress.percent }}%"></div>
@@ -24,15 +24,14 @@
   const root = document.getElementById("import-progress");
   if (!root) return;
   const jobId = root.dataset.jobId;
-  const maxWorkers = Math.max(1, parseInt(root.dataset.maxWorkers || "2", 10) || 2);
   const statusEl = document.getElementById("progress-status");
   const fillEl = document.getElementById("progress-fill");
   const countEl = document.getElementById("progress-count");
   const errorEl = document.getElementById("progress-error");
   const actionsEl = document.getElementById("progress-actions");
   const bar = root.querySelector(".progress-bar");
-  let inFlight = 0;
   let stopped = false;
+  let timer = null;
 
   function apply(data) {
     if (statusEl) statusEl.textContent = data.message || "";
@@ -57,38 +56,20 @@
     return false;
   }
 
-  async function step() {
+  async function poll() {
     if (stopped) return;
-    inFlight += 1;
     try {
-      const res = await fetch("/import/" + jobId + "/process-step", {
-        method: "POST",
+      const res = await fetch("/import/" + jobId + "/progress.json", {
         headers: { "Accept": "application/json" },
         credentials: "same-origin",
       });
       const data = await res.json();
       if (apply(data)) return;
-      // No pending work yet (other worker still busy) — brief pause then retry
-      const idle = (data.done || 0) >= (data.total || 0) && data.status === "processing";
-      setTimeout(pump, idle ? 200 : 40);
     } catch (err) {
-      stopped = true;
-      root.classList.add("is-failed");
-      if (errorEl) {
-        errorEl.hidden = false;
-        errorEl.textContent = String(err);
-      }
-      if (actionsEl) actionsEl.hidden = false;
-    } finally {
-      inFlight -= 1;
+      // Network blip — keep polling; server queue continues
+      if (statusEl) statusEl.textContent = String(err);
     }
-  }
-
-  function pump() {
-    if (stopped) return;
-    while (inFlight < maxWorkers) {
-      step();
-    }
+    timer = setTimeout(poll, 1000);
   }
 
   if (root.dataset.status === "failed") {
@@ -99,7 +80,7 @@
     window.location.href = root.dataset.reviewUrl;
     return;
   }
-  pump();
+  poll();
 })();
 </script>
 {% endblock %}

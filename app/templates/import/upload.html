@@ -3,6 +3,24 @@
 {% block content %}
 <h1>{{ t('upload_report') }}</h1>
 <p class="muted">{{ t('upload_first_hint') }}</p>
+
+{% if open_jobs %}
+<section class="card open-imports">
+  <h2>{{ t('open_imports_title') }}</h2>
+  <ul>
+    {% for j in open_jobs %}
+    <li>
+      {% if j.status == 'processing' %}
+      <a href="/import/{{ j.id }}/progress">#{{ j.id }} — {{ j.filename }} ({{ t('import_status_processing') }})</a>
+      {% else %}
+      <a href="/import/{{ j.id }}/review">#{{ j.id }} — {{ j.filename }} ({{ t('import_status_review') }})</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 <form method="post" action="/import" enctype="multipart/form-data" class="card" id="import-upload-form">
   <label>{{ t('lab_name') }}
     <input type="text" name="lab_name" placeholder="{{ t('optional') }}">
@@ -10,7 +28,7 @@
   <label>{{ t('upload') }}
     <input type="file" name="files" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" required>
   </label>
-  <p class="muted">{{ t('upload_batch_hint') }}</p>
+  <p class="muted">{{ t('upload_batch_hint', max=max_import_files) }}</p>
   <fieldset class="extract-mode">
     <legend>{{ t('extract_mode') }}</legend>
     {% if smart_available %}

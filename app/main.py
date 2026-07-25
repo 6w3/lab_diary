@@ -73,6 +73,16 @@ def on_startup() -> None:
         seed_markers(db)
     finally:
         db.close()
+    from app.services.import_worker import start_import_worker
+
+    start_import_worker()
+
+
+@app.on_event("shutdown")
+def on_shutdown() -> None:
+    from app.services.import_worker import stop_import_worker
+
+    stop_import_worker()
 
 
 @app.get("/health")

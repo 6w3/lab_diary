@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     app_base_url: str = "http://localhost:8000"
     upload_dir: str = "uploads"
     max_attachments_per_draw: int = 10
+    # Soft cap per import job (batch upload)
+    max_import_files: int = 40
+    # Parallel Smart/classic extracts in the in-process worker
+    import_worker_concurrency: int = 2
     # auto | rapid | tesseract
     ocr_engine: str = "auto"
     # Smart extract (NVIDIA NIM only)
