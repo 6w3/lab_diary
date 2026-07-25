@@ -189,11 +189,13 @@ document.querySelectorAll('canvas[data-key]').forEach((el) => {
   const times = rawDates.map(parseDay);
   if (times.some((t) => !t)) return;
 
-  const xy = (ys) => times.map((t, i) => ({ x: t, y: ys[i] }));
+  // Chart.js time scale + parsing:false needs numeric timestamps, not Date
+  // objects — Date x-values make the axis fall back to "now" and hide points.
+  const xy = (ys) => times.map((t, i) => ({ x: t.getTime(), y: ys[i] }));
   // Tip lines span full time range (not only sample index slots).
   const tipSpan = (y) => [
-    { x: times[0], y },
-    { x: times[times.length - 1], y },
+    { x: times[0].getTime(), y },
+    { x: times[times.length - 1].getTime(), y },
   ];
 
   const datasets = [{
