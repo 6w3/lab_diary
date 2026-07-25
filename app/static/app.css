@@ -17,6 +17,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body {
   margin: 0;
   font-family: var(--sans);
@@ -87,6 +88,29 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 .row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .list { list-style: none; padding: 0; }
 .list li { padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+.draw-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0.5rem 0 0.25rem;
+  flex-wrap: wrap;
+}
+.draw-bulk-select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+}
+.draw-bulk-select-all input { margin: 0; }
+.draw-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+.draw-list li > a { flex: 1; min-width: 12rem; }
+.draw-list .draw-check { margin: 0; flex-shrink: 0; }
 .badge {
   display: inline-block;
   margin-left: 0.4rem;
@@ -98,6 +122,19 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 }
 .open-imports h2 { margin: 0; font-size: 1.1rem; }
 .open-imports .list { margin: 0; }
+.open-import-link { display: inline; }
+.open-import-files {
+  list-style: disc;
+  margin: 0.35rem 0 0.15rem 1.25rem;
+  padding: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+.open-import-files li {
+  padding: 0.1rem 0;
+  border-bottom: none;
+  word-break: break-word;
+}
 .muted { color: var(--muted); }
 .error, .flash { padding: 0.75rem; background: var(--flash-bg); border: 1px solid var(--flash-border); }
 .file-error-list { list-style: none; padding: 0; margin: 0.5rem 0; }
@@ -212,7 +249,7 @@ th, td { border-bottom: 1px solid var(--border); padding: 0.5rem; text-align: le
   place-items: center;
   z-index: 100;
 }
-.upload-overlay[hidden] { display: none; }
+.upload-overlay[hidden] { display: none !important; }
 .upload-overlay-card {
   text-align: center;
   padding: 1.5rem;

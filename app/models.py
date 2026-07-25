@@ -11,6 +11,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -112,8 +113,12 @@ class ImportJob(Base):
     filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(128))
     storage_path: Mapped[str] = mapped_column(String(512))
-    ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    proposals_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_raw_text: Mapped[str | None] = mapped_column(
+        Text().with_variant(MEDIUMTEXT(), "mysql"), nullable=True
+    )
+    proposals_json: Mapped[str | None] = mapped_column(
+        Text().with_variant(MEDIUMTEXT(), "mysql"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="import_jobs")
@@ -135,7 +140,9 @@ class Attachment(Base):
     content_type: Mapped[str] = mapped_column(String(128))
     storage_path: Mapped[str] = mapped_column(String(512))
     ocr_status: Mapped[str] = mapped_column(String(32), default="pending")  # pending|processing|done|failed|skipped
-    ocr_raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_raw_text: Mapped[str | None] = mapped_column(
+        Text().with_variant(MEDIUMTEXT(), "mysql"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     blood_draw: Mapped[BloodDraw | None] = relationship(back_populates="attachments")

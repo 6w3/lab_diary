@@ -204,9 +204,22 @@ def prepare_review_proposals(db: Session, job: ImportJob, payload: dict | None =
 
 def finalize_job(db: Session, job: ImportJob) -> None:
     enriched, payload = prepare_review_proposals(db, job)
-    raw_parts = payload.get("raw_parts") or []
-    job.ocr_raw_text = "\n\n".join(raw_parts) if raw_parts else job.ocr_raw_text
-    atts = db.query(Attachment).filter(Attachment.import_job_id == job.id).all()
+    atts = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .order_by(Attachment.id)
+        .all()
+    )
+    # Prefer per-attachment OCR text — do not duplicate full raw into proposals_json.
+    raw_parts = []
+    for a in atts:
+        if a.ocr_status != "done" or not (a.ocr_raw_text or "").strip():
+            continue
+        label = attachment_display_name(a)
+        raw_parts.append(f"--- {label} ---\n{a.ocr_raw_text}")
+    if raw_parts:
+        job.ocr_raw_text = "\n\n".join(raw_parts)
+    payload.pop("raw_parts", None)
     file_errors = list(payload.get("file_errors") or [])
     labs_by_att = payload.get("labs_by_attachment") or {}
     detected_lab = (payload.get("detected_lab") or "").strip()
@@ -221,7 +234,6 @@ def finalize_job(db: Session, job: ImportJob) -> None:
             "labs_by_attachment": labs_by_att,
             "lab_name_form": payload.get("lab_name_form") or "",
             "detected_lab": detected_lab,
-            "raw_parts": raw_parts,
             "extract_meta": {
                 "source": job.extract_mode,
                 "dates": detected_dates,
@@ -544,7 +556,8 @@ def process_claimed_attachment(
             row["proposed_workplace"] = file_wp
         payload.setdefault("proposals", []).append(row)
     payload["proposals"] = filter_proposals(payload.get("proposals") or [])
-    payload.setdefault("raw_parts", []).append(f"--- {filename} ---\n{raw or ''}")
+    # Full OCR stays on attachment.ocr_raw_text — keep proposals_json lean.
+    payload.pop("raw_parts", None)
     lab = file_lab
     if lab and not (payload.get("detected_lab") or "").strip():
         payload["detected_lab"] = lab

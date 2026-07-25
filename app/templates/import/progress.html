@@ -53,7 +53,8 @@
     </div>
   </div>
 
-  <div class="card error-box" id="progress-file-errors" {% if not progress.file_errors %}hidden{% endif %}>
+  <div class="card error-box" id="progress-file-errors"
+       {% if not progress.file_errors or (progress.file_errors|length) == 0 %}hidden{% endif %}>
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
     <p class="muted" id="progress-retry-hint"
        {% if (progress.file_errors or [])|length < 2 %}hidden{% endif %}>{{ t('import_retry_while_running_hint') }}</p>

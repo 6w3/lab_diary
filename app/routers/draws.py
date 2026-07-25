@@ -15,6 +15,7 @@ from app.services.draw_organize import (
     apply_draw_conditions,
     attachments_for_draw,
     create_draw as create_blood_draw,
+    delete_owned_draws,
     merge_draw_into,
     move_results_to_draw,
 )
@@ -115,7 +116,7 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         )
         for d in draws
     ]
-    open_jobs = (
+    open_jobs_raw = (
         db.query(ImportJob)
         .filter(
             ImportJob.user_id == user.id,
@@ -125,6 +126,29 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         .limit(20)
         .all()
     )
+    open_jobs = []
+    for j in open_jobs_raw:
+        atts = (
+            db.query(Attachment)
+            .filter(Attachment.import_job_id == j.id)
+            .order_by(Attachment.id)
+            .all()
+        )
+        names = [
+            ((a.original_filename or "").strip() or (a.filename or "").strip() or "file")
+            for a in atts
+        ]
+        if not names and (j.filename or "").strip():
+            names = [j.filename.strip()]
+        open_jobs.append(
+            SimpleNamespace(
+                id=j.id,
+                status=j.status,
+                filename=j.filename,
+                file_count=len(names),
+                file_names=names,
+            )
+        )
     return templates.TemplateResponse(
         request,
         "draws/list.html",
@@ -239,6 +263,20 @@ async def edit_draw(request: Request, db: DbDep, user: UserDep, draw_id: int):
         db.add(conditions)
     db.commit()
     return redirect(f"/draws/{draw.id}")
+
+
+@router.post("/bulk-delete")
+async def bulk_delete_draws(request: Request, db: DbDep, user: UserDep):
+    form = await read_form(request)
+    ids: list[int] = []
+    for raw in form.getlist("draw_id"):
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    if delete_owned_draws(db, user.id, ids):
+        db.commit()
+    return redirect("/draws")
 
 
 @router.post("/{draw_id}/delete")

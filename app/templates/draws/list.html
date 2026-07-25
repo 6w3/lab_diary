@@ -20,15 +20,24 @@
     {% for j in open_jobs %}
     <li class="open-import-item" data-job-id="{{ j.id }}" data-status="{{ j.status }}">
       {% if j.status == 'review' %}
-      <a href="/import/{{ j.id }}/review">
-        <strong>#{{ j.id }}</strong> — {{ j.filename }}
+      <a href="/import/{{ j.id }}/review" class="open-import-link">
+        <strong>#{{ j.id }}</strong> —
+        {% if j.file_count > 1 %}{{ t('open_import_files_count', n=j.file_count) }}{% else %}{{ j.file_names[0] if j.file_names else j.filename }}{% endif %}
         <span class="badge open-import-status">{{ t('import_status_review') }}</span>
       </a>
       {% else %}
-      <a href="/import/{{ j.id }}/progress">
-        <strong>#{{ j.id }}</strong> — {{ j.filename }}
+      <a href="/import/{{ j.id }}/progress" class="open-import-link">
+        <strong>#{{ j.id }}</strong> —
+        {% if j.file_count > 1 %}{{ t('open_import_files_count', n=j.file_count) }}{% else %}{{ j.file_names[0] if j.file_names else j.filename }}{% endif %}
         <span class="muted open-import-status">{{ t('import_status_processing') }}</span>
       </a>
+      {% endif %}
+      {% if j.file_count > 1 %}
+      <ul class="open-import-files">
+        {% for name in j.file_names %}
+          <li>{{ name }}</li>
+        {% endfor %}
+      </ul>
       {% endif %}
     </li>
     {% endfor %}
@@ -109,18 +118,55 @@
 {% if not draws %}
   <p>{{ t('empty_draws') }}</p>
 {% else %}
-  <ul class="list">
-    {% for d in draws %}
-      <li>
-        <a href="/draws/{{ d.id }}">
-          <strong>{{ d.drawn_at.strftime('%Y-%m-%d') }}</strong>
-          — {{ d.lab_name }}
-        </a>
-        {% if d.missing_conditions %}
-          <span class="muted"> · {{ t('missing_conditions') }}</span>
-        {% endif %}
-      </li>
-    {% endfor %}
-  </ul>
+  <form method="post" action="/draws/bulk-delete" class="draw-bulk"
+        data-confirm="{{ t('delete_draws_confirm') }}"
+        onsubmit="return confirmBulkDelete(this)">
+    <div class="draw-bulk-toolbar">
+      <label class="draw-bulk-select-all">
+        <input type="checkbox" id="draw-select-all" aria-label="{{ t('select_all') }}">
+        {{ t('select_all') }}
+      </label>
+      <button type="submit" class="danger">{{ t('delete') }}</button>
+    </div>
+    <ul class="list draw-list">
+      {% for d in draws %}
+        <li>
+          <input type="checkbox" name="draw_id" value="{{ d.id }}" class="draw-check"
+                 aria-label="{{ d.drawn_at.strftime('%Y-%m-%d') }} — {{ d.lab_name }}">
+          <a href="/draws/{{ d.id }}">
+            <strong>{{ d.drawn_at.strftime('%Y-%m-%d') }}</strong>
+            — {{ d.lab_name }}
+          </a>
+          {% if d.missing_conditions %}
+            <span class="muted"> · {{ t('missing_conditions') }}</span>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  </form>
+  <script>
+  (function () {
+    const form = document.querySelector("form.draw-bulk");
+    if (!form) return;
+    const selectAll = document.getElementById("draw-select-all");
+    const boxes = () => Array.from(form.querySelectorAll("input.draw-check"));
+    if (selectAll) {
+      selectAll.addEventListener("change", () => {
+        boxes().forEach((el) => { el.checked = selectAll.checked; });
+      });
+      form.addEventListener("change", (ev) => {
+        if (!ev.target.classList.contains("draw-check")) return;
+        const all = boxes();
+        selectAll.checked = all.length > 0 && all.every((el) => el.checked);
+      });
+    }
+    window.confirmBulkDelete = function (f) {
+      const n = boxes().filter((el) => el.checked).length;
+      if (!n) return false;
+      const tpl = f.dataset.confirm || "";
+      return confirm(tpl.replace(/\{n\}/g, String(n)));
+    };
+  })();
+  </script>
 {% endif %}
 {% endblock %}

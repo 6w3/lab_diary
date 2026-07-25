@@ -302,6 +302,23 @@ def merge_draw_into(
     return moved, skipped, deleted
 
 
+def delete_owned_draws(db, user_id: int, draw_ids: list[int]) -> int:
+    """Delete draws owned by user. Returns how many were deleted. Caller commits."""
+    from app.models import BloodDraw
+
+    wanted = {int(i) for i in draw_ids}
+    if not wanted:
+        return 0
+    draws = (
+        db.query(BloodDraw)
+        .filter(BloodDraw.user_id == user_id, BloodDraw.id.in_(wanted))
+        .all()
+    )
+    for draw in draws:
+        db.delete(draw)
+    return len(draws)
+
+
 def attachments_for_draw(draw) -> list:
     """Prefer M2M links; fall back to legacy blood_draw_id."""
     linked = [link.attachment for link in (draw.draw_attachments or []) if link.attachment]

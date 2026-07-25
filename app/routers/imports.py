@@ -170,7 +170,6 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
         if current
         else ""
     )
-    running_names = ", ".join(e["filename"] for e in file_running)
 
     payload = {}
     try:
@@ -219,13 +218,14 @@ def _progress_dict(job: ImportJob, db, *, locale: str = "cs") -> dict:
                 failed=str(len(failed_atts)),
                 running=str(running),
             )
-    elif running > 1:
+    elif total > 1 and unfinished:
+        # Names live in the file lists below — status keeps a short count.
         message = i18n_t(
             locale,
-            "import_progress_files_running",
-            running=str(running),
+            "import_progress_batch",
+            n=str(total),
+            done=str(done),
             total=str(total),
-            filenames=running_names,
         )
     elif current:
         message = i18n_t(
@@ -480,17 +480,25 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
     raw_payload = job_payload(job)
     if job.status == "processing" and not (raw_payload.get("proposals") or []):
         return redirect(f"/import/{job.id}/progress")
+
+    def _safe_save(payload_to_save: dict) -> None:
+        try:
+            # Drop legacy bloated OCR copies if present.
+            payload_to_save.pop("raw_parts", None)
+            save_job_payload(job, payload_to_save)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+
     # Ensure stable uids exist before rendering (confirm drops by uid).
     # Mid-flight: do not rewrite enriched/sorted proposals — worker may still append.
     if job.status == "processing":
         if ensure_proposal_uids(raw_payload):
-            save_job_payload(job, raw_payload)
-            db.commit()
+            _safe_save(raw_payload)
         proposals, payload = prepare_review_proposals(db, job, raw_payload)
     else:
         proposals, payload = prepare_review_proposals(db, job, raw_payload)
-        save_job_payload(job, {**raw_payload, **payload, "proposals": proposals})
-        db.commit()
+        _safe_save({**raw_payload, **payload, "proposals": proposals})
     # Live failed attachments only — never show a stale empty/ stale payload error box.
     job_atts = (
         db.query(Attachment)
@@ -524,8 +532,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         )
     if payload.get("file_errors") != file_errors:
         payload["file_errors"] = file_errors
-        save_job_payload(job, {**raw_payload, **payload, "proposals": proposals})
-        db.commit()
+        _safe_save({**raw_payload, **payload, "proposals": proposals})
     # Backfill lab/workplace from attachment raw when labs_by_attachment gaps remain.
     labs_by_att = payload.get("labs_by_attachment") or {}
     needs_lab = any(not (p.get("proposed_lab_name") or "").strip() for p in proposals)
