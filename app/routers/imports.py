@@ -491,7 +491,7 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         proposals, payload = prepare_review_proposals(db, job, raw_payload)
         save_job_payload(job, {**raw_payload, **payload, "proposals": proposals})
         db.commit()
-    file_errors = list(payload.get("file_errors") or [])
+    # Live failed attachments only — never show a stale empty/ stale payload error box.
     job_atts = (
         db.query(Attachment)
         .filter(Attachment.import_job_id == job.id)
@@ -499,22 +499,33 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
         .all()
     )
     att_by_id = {a.id: a for a in job_atts}
-    if file_errors or any(a.ocr_status == "failed" for a in job_atts):
-        failed = [a for a in job_atts if a.ocr_status == "failed"]
-        by_err = {e.get("attachment_id"): e for e in file_errors if e.get("attachment_id")}
-        file_errors = []
-        for a in failed:
-            pos = next((i + 1 for i, x in enumerate(job_atts) if x.id == a.id), None)
-            prev = by_err.get(a.id) or {}
-            file_errors.append(
-                {
-                    **prev,
-                    "attachment_id": a.id,
-                    "filename": attachment_display_name(a, index=pos, total=len(job_atts)),
-                    "original_filename": (a.original_filename or "").strip() or None,
-                    "error": prev.get("error") or (a.ocr_raw_text or "failed")[:500],
-                }
-            )
+    failed = [a for a in job_atts if a.ocr_status == "failed"]
+    by_err = {
+        e.get("attachment_id"): e
+        for e in (payload.get("file_errors") or [])
+        if e.get("attachment_id")
+    }
+    file_errors: list[dict] = []
+    for a in failed:
+        pos = next((i + 1 for i, x in enumerate(job_atts) if x.id == a.id), None)
+        prev = by_err.get(a.id) or {}
+        err = (prev.get("error") or (a.ocr_raw_text or "") or "").strip()
+        name = attachment_display_name(a, index=pos, total=len(job_atts))
+        if not name and not err:
+            continue
+        file_errors.append(
+            {
+                **prev,
+                "attachment_id": a.id,
+                "filename": name,
+                "original_filename": (a.original_filename or "").strip() or None,
+                "error": err or "failed",
+            }
+        )
+    if payload.get("file_errors") != file_errors:
+        payload["file_errors"] = file_errors
+        save_job_payload(job, {**raw_payload, **payload, "proposals": proposals})
+        db.commit()
     # Backfill lab/workplace from attachment raw when labs_by_attachment gaps remain.
     labs_by_att = payload.get("labs_by_attachment") or {}
     needs_lab = any(not (p.get("proposed_lab_name") or "").strip() for p in proposals)

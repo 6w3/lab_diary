@@ -8,11 +8,14 @@
     {{ t('conditions_edit_title') }}
   {% endif %}
 </h1>
-<p class="muted">
-  {{ draw.drawn_at.strftime('%Y-%m-%d') }} — {{ draw.lab_name }}
-  · {{ t('conditions_remaining') }}: {{ remaining }}
+<p>
+  <strong>{{ t('conditions_for_draw') }}:</strong>
+  {{ draw.drawn_at.strftime('%Y-%m-%d') }} — {{ draw.lab_name }}{% if draw.workplace %} · {{ draw.workplace }}{% endif %}
 </p>
-{% if has_conditions and not is_new %}
+<p class="muted">{{ t('conditions_remaining') }}: {{ remaining }}</p>
+{% if is_new or not has_conditions %}
+  <p class="muted">{{ t('conditions_create_hint') }}</p>
+{% else %}
   <p class="muted">{{ t('conditions_edit_hint') }}</p>
 {% endif %}
 <form method="post" action="/import/conditions" class="card">

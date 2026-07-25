@@ -9,13 +9,14 @@
     <p><a class="btn secondary" href="{{ progress_url }}">{{ t('import_back_to_progress') }}</a></p>
   </div>
 {% endif %}
-{% if file_errors %}
+{% if file_errors and file_errors|length > 0 %}
   <div class="card error-box">
     <p><strong>{{ t('import_file_errors_title') }}</strong></p>
     <ul class="file-error-list">
       {% for e in file_errors %}
+        {% if e.filename or e.error %}
         <li>
-          <span><strong>{{ t('import_file_error_item', label=e.filename) }}</strong>: {{ e.error }}</span>
+          <span><strong>{{ t('import_file_error_item', label=e.filename or 'file') }}</strong>{% if e.error %}: {{ e.error }}{% endif %}</span>
           {% if e.attachment_id %}
           <form method="post" action="/import/{{ job.id }}/retry-files" class="inline-form">
             <input type="hidden" name="attachment_id" value="{{ e.attachment_id }}">
@@ -23,6 +24,7 @@
           </form>
           {% endif %}
         </li>
+        {% endif %}
       {% endfor %}
     </ul>
     {% if file_errors|length > 1 %}
