@@ -8,6 +8,30 @@
     <a class="btn secondary" href="/draws/new">{{ t('manual_entry') }}</a>
   </div>
 </div>
+
+{% if open_jobs %}
+<section class="card open-imports" aria-label="{{ t('open_imports_title') }}">
+  <h2>{{ t('open_imports_title') }}</h2>
+  <ul class="list">
+    {% for j in open_jobs %}
+    <li>
+      {% if j.status == 'review' %}
+      <a href="/import/{{ j.id }}/review">
+        <strong>#{{ j.id }}</strong> — {{ j.filename }}
+        <span class="badge">{{ t('import_status_review') }}</span>
+      </a>
+      {% else %}
+      <a href="/import/{{ j.id }}/progress">
+        <strong>#{{ j.id }}</strong> — {{ j.filename }}
+        <span class="muted">{{ t('import_status_processing') }}</span>
+      </a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if not draws %}
   <p>{{ t('empty_draws') }}</p>
 {% else %}

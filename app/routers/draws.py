@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.deps import DbDep, LocaleDep, UserDep, redirect, template_context
-from app.models import Attachment, BloodDraw, DrawConditions, Marker, ResultValue, User
+from app.models import Attachment, BloodDraw, DrawConditions, ImportJob, Marker, ResultValue, User
 from app.services.draw_organize import (
     apply_draw_conditions,
     attachments_for_draw,
@@ -110,10 +110,20 @@ def list_draws(request: Request, db: DbDep, locale: LocaleDep, user: UserDep):
         )
         for d in draws
     ]
+    open_jobs = (
+        db.query(ImportJob)
+        .filter(
+            ImportJob.user_id == user.id,
+            ImportJob.status.in_(("processing", "review")),
+        )
+        .order_by(ImportJob.id.desc())
+        .limit(20)
+        .all()
+    )
     return templates.TemplateResponse(
         request,
         "draws/list.html",
-        template_context(request, locale, draws=draw_rows),
+        template_context(request, locale, draws=draw_rows, open_jobs=open_jobs),
     )
 
 

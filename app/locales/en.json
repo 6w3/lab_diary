@@ -35,7 +35,7 @@
   "import_progress_done": "Done — opening review…",
   "import_progress_failed": "Reading the report failed. Try Classic mode or a smaller batch.",
   "import_progress_server_hint": "Processing runs on the server. You can close this tab — the job continues in the background.",
-  "open_imports_title": "Open imports",
+  "open_imports_title": "Reports to review",
   "import_status_processing": "processing",
   "import_status_review": "ready for review",
   "upload_extends_hint": "Upload new reports via Upload report — the system assigns them to draws by date.",

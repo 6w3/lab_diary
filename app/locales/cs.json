@@ -35,7 +35,7 @@
   "import_progress_done": "Hotovo — přecházím ke kontrole…",
   "import_progress_failed": "Čtení reportu selhalo. Zkus Classic režim nebo menší dávku.",
   "import_progress_server_hint": "Zpracování běží na serveru. Tab můžeš zavřít — job doběhne na pozadí.",
-  "open_imports_title": "Rozpracované importy",
+  "open_imports_title": "Reporty ke kontrole",
   "import_status_processing": "načítá se",
   "import_status_review": "ke kontrole",
   "upload_extends_hint": "Nový report nahraj přes Nahrát report — systém ho přiřadí k odběrům podle data.",
