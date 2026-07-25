@@ -15,6 +15,7 @@ from app.services.multi_date import prefer_multi_date_proposals, unique_drawn_da
 from app.services.ocr_parse import normalize_unit
 from app.services.ocr_tables import parse_iso_date
 from app.services.smart_extract import run_smart_extract
+from app.services.storage import delete_file
 from app.services.units import correct_unit_by_magnitude, unit_options_for_marker
 
 logger = logging.getLogger(__name__)
@@ -468,6 +469,89 @@ def queue_attachment_reextract(
     job.status = "processing"
     db.commit()
     return True
+
+
+def remove_import_attachment(
+    db: Session,
+    job: ImportJob,
+    *,
+    attachment_id: int,
+) -> str:
+    """Remove one import file + its proposals from the review job.
+
+    Returns:
+      - "removed" — file gone, job still has other attachments
+      - "job_deleted" — last file removed, whole job deleted
+      - "missing" — attachment/job mismatch
+    """
+    if job.status not in {"review", "failed", "processing"}:
+        return "missing"
+    att = db.get(Attachment, attachment_id)
+    if not att or att.import_job_id != job.id:
+        return "missing"
+
+    payload = job_payload(job)
+    payload["proposals"] = [
+        p
+        for p in (payload.get("proposals") or [])
+        if p.get("attachment_id") != att.id
+    ]
+    payload["file_errors"] = [
+        e
+        for e in (payload.get("file_errors") or [])
+        if e.get("attachment_id") != att.id
+    ]
+    labs = dict(payload.get("labs_by_attachment") or {})
+    labs.pop(str(att.id), None)
+    payload["labs_by_attachment"] = labs
+    hints = dict(payload.get("extract_hints") or {})
+    hints.pop(str(att.id), None)
+    payload["extract_hints"] = hints
+    payload["detected_dates"] = unique_drawn_dates(payload.get("proposals") or [])
+    save_job_payload(job, payload)
+
+    # Drop draw links if any (usually none until confirm).
+    try:
+        from app.models import DrawAttachment
+
+        db.query(DrawAttachment).filter(DrawAttachment.attachment_id == att.id).delete(
+            synchronize_session=False
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+    paths = []
+    if att.storage_path:
+        paths.append(att.storage_path)
+        try:
+            from app.services.attachment_preview import preview_cache_path
+
+            paths.append(str(preview_cache_path(att.storage_path)))
+        except Exception:  # noqa: BLE001
+            pass
+    for path in paths:
+        delete_file(path)
+
+    db.delete(att)
+    db.flush()
+
+    left = (
+        db.query(Attachment)
+        .filter(Attachment.import_job_id == job.id)
+        .count()
+    )
+    if left == 0:
+        if job.storage_path:
+            delete_file(job.storage_path)
+        db.delete(job)
+        db.commit()
+        return "job_deleted"
+
+    # Keep review if proposals remain (or empty review for remaining files still processing)
+    if job.status == "failed" and (payload.get("proposals") or []):
+        job.status = "review"
+    db.commit()
+    return "removed"
 
 
 def claim_next_attachment(db: Session) -> tuple[int, int, str, str, str] | None:

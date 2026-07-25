@@ -144,6 +144,43 @@ def panels_compatible(a: str, b: str) -> bool:
     return a == b
 
 
+def _row_panel_bucket(row: dict[str, Any] | Any) -> str:
+    code = _marker_key(row)
+    if code in HEMA_CODES:
+        return "hema"
+    if code in BIOCHEM_CODES:
+        return "biochem"
+    return "unknown"
+
+
+def split_day_proposals(rows: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Keep one day's proposals together; split only clear hema vs biochem.
+
+    Single-marker panel_family is always 'unknown', so do not cluster row-by-row.
+    """
+    if not rows:
+        return []
+    hema: list[dict[str, Any]] = []
+    bio: list[dict[str, Any]] = []
+    other: list[dict[str, Any]] = []
+    for p in rows:
+        bucket = _row_panel_bucket(p)
+        if bucket == "hema":
+            hema.append(p)
+        elif bucket == "biochem":
+            bio.append(p)
+        else:
+            other.append(p)
+
+    hema_n = len({_marker_key(p) for p in hema})
+    bio_n = len({_marker_key(p) for p in bio})
+    if hema_n >= 2 and bio_n >= 2:
+        if len(bio) >= len(hema):
+            return [hema, bio + other]
+        return [hema + other, bio]
+    return [list(rows)]
+
+
 def looks_like_same_report(
     rows_a: Iterable[dict[str, Any] | Any],
     rows_b: Iterable[dict[str, Any] | Any],

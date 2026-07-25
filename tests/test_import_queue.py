@@ -75,6 +75,7 @@ class _FakeDB:
         self.attachments = list(attachments or [])
         self.jobs = {j.id: j for j in (jobs or [])}
         self.committed = False
+        self.deleted = []
 
     def query(self, model):
         from app.models import Attachment
@@ -93,6 +94,17 @@ class _FakeDB:
                 if a.id == pk:
                     return a
         return None
+
+    def delete(self, obj):
+        self.deleted.append(obj)
+        if obj in self.attachments:
+            self.attachments.remove(obj)
+        job_id = getattr(obj, "id", None)
+        if job_id in self.jobs and self.jobs[job_id] is obj:
+            del self.jobs[job_id]
+
+    def flush(self):
+        pass
 
     def commit(self):
         self.committed = True
@@ -272,3 +284,74 @@ def test_queue_attachment_reextract_drops_proposals_and_stores_hint():
     payload = job_payload(job)
     assert [p["label"] for p in payload["proposals"]] == ["RBC"]
     assert payload["extract_hints"]["10"] == "sloupce jsou data"
+
+
+def test_remove_import_attachment_drops_proposals_and_file():
+    from app.services.import_process import remove_import_attachment
+
+    job = SimpleNamespace(
+        id=1,
+        status="review",
+        proposals_json=(
+            '{"proposals":['
+            '{"label":"HGB","attachment_id":10,"uid":"a","proposed_drawn_on":"2024-01-01"},'
+            '{"label":"RBC","attachment_id":11,"uid":"b","proposed_drawn_on":"2024-01-02"}'
+            '],"file_errors":[],"labs_by_attachment":{"10":{"lab_name":"A"}},'
+            '"extract_hints":{"10":"x"}}'
+        ),
+        user_id=1,
+        ocr_raw_text=None,
+        storage_path=None,
+    )
+    done = SimpleNamespace(
+        id=10,
+        import_job_id=1,
+        ocr_status="done",
+        filename="a.jpg",
+        storage_path="/tmp/lab_diary_test_a.jpg",
+        ocr_raw_text="{}",
+    )
+    other = SimpleNamespace(
+        id=11,
+        import_job_id=1,
+        ocr_status="done",
+        filename="b.jpg",
+        storage_path="/tmp/lab_diary_test_b.jpg",
+        ocr_raw_text="{}",
+    )
+    db = _FakeDB(attachments=[done, other], jobs=[job])
+    result = remove_import_attachment(db, job, attachment_id=10)
+    assert result == "removed"
+    assert done not in db.attachments
+    assert other in db.attachments
+    payload = job_payload(job)
+    assert [p["label"] for p in payload["proposals"]] == ["RBC"]
+    assert "10" not in (payload.get("labs_by_attachment") or {})
+    assert "10" not in (payload.get("extract_hints") or {})
+    assert payload.get("detected_dates") == ["2024-01-02"]
+
+
+def test_remove_last_import_attachment_deletes_job():
+    from app.services.import_process import remove_import_attachment
+
+    job = SimpleNamespace(
+        id=1,
+        status="review",
+        proposals_json='{"proposals":[{"label":"HGB","attachment_id":10}]}',
+        user_id=1,
+        ocr_raw_text=None,
+        storage_path=None,
+    )
+    only = SimpleNamespace(
+        id=10,
+        import_job_id=1,
+        ocr_status="done",
+        filename="a.jpg",
+        storage_path="/tmp/lab_diary_test_only.jpg",
+        ocr_raw_text="{}",
+    )
+    db = _FakeDB(attachments=[only], jobs=[job])
+    result = remove_import_attachment(db, job, attachment_id=10)
+    assert result == "job_deleted"
+    assert db.attachments == []
+    assert 1 not in db.jobs

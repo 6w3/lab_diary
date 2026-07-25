@@ -170,7 +170,7 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 }
 .reextract-row {
   display: grid;
-  grid-template-columns: minmax(10rem, 16rem) 1fr;
+  grid-template-columns: minmax(10rem, 16rem) 1fr auto;
   gap: 1rem;
   align-items: start;
   padding: 0.85rem 0;
@@ -211,6 +211,52 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 }
 .reextract-form textarea { width: 100%; min-height: 2.8rem; resize: vertical; }
 .reextract-form button { justify-self: start; }
+.reextract-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.reextract-side {
+  display: grid;
+  gap: 0.65rem;
+  align-content: start;
+  min-width: 9rem;
+}
+.reextract-delete { margin: 0; }
+.reextract-delete button.danger {
+  background: transparent;
+  color: #b42318;
+  border: 1px solid #b42318;
+}
+.reextract-delete button.danger:hover {
+  background: #b42318;
+  color: #fff;
+}
+.att-markers {
+  font-size: 0.88rem;
+  max-width: 16rem;
+}
+.att-markers summary {
+  cursor: pointer;
+  color: var(--accent, #1a5f7a);
+  user-select: none;
+}
+.att-markers ul {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fafafa;
+}
+.att-markers li {
+  padding: 0.3rem 0.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.45rem;
+  align-items: baseline;
+}
+.att-markers li:first-child { border-top: none; }
+.att-markers p { margin: 0.35rem 0 0; }
 .file-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

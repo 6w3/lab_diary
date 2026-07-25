@@ -65,8 +65,35 @@
         <textarea name="user_hint" rows="3" maxlength="1500"
                   placeholder="{{ t('import_reextract_placeholder') }}"></textarea>
       </label>
-      <button type="submit" class="secondary">{{ t('import_reextract_submit') }}</button>
+      <div class="reextract-actions">
+        <button type="submit" class="secondary">{{ t('import_reextract_submit') }}</button>
+      </div>
     </form>
+    <div class="reextract-side">
+      <form method="post" action="/import/{{ job.id }}/remove-file" class="reextract-delete"
+            data-confirm="{{ t('import_remove_file_confirm') }}"
+            onsubmit="return confirm(this.getAttribute('data-confirm'))">
+        <input type="hidden" name="attachment_id" value="{{ a.id }}">
+        <button type="submit" class="danger">{{ t('import_remove_file') }}</button>
+      </form>
+      <details class="att-markers">
+        <summary>{{ t('import_file_markers', count=a.markers|length) }}</summary>
+        {% if a.markers %}
+        <ul>
+          {% for m in a.markers %}
+          <li>
+            <strong>{{ m.label }}</strong>
+            {% if m.value is not none %}{{ m.value }}{% endif %}
+            {% if m.unit %}{{ m.unit }}{% endif %}
+            {% if m.drawn_on %}<span class="muted">{{ m.drawn_on }}</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">{{ t('import_file_markers_empty') }}</p>
+        {% endif %}
+      </details>
+    </div>
   </div>
   {% endfor %}
 </section>

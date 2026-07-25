@@ -31,6 +31,7 @@ from app.services.import_process import (
     prepare_review_proposals,
     process_claimed_attachment,
     queue_attachment_reextract,
+    remove_import_attachment,
     retry_failed_attachments,
     save_job_payload,
 )
@@ -62,8 +63,8 @@ def _build_groups(
     proposals: list[dict],
     default_lab: str,
 ) -> list[dict]:
-    """Group by date + panel; merge same-day same-panel across different lab OCR names."""
-    from app.services.draw_match import looks_like_same_report, panel_family, panels_compatible
+    """Group by date (+ hema/biochem split); merge same-day lab OCR name variants."""
+    from app.services.draw_match import split_day_proposals
 
     by_date: dict[str, list] = {}
     date_order: list[str] = []
@@ -76,37 +77,7 @@ def _build_groups(
 
     merged_groups: list[list] = []
     for d in sorted(date_order, key=lambda x: x or "9999"):
-        clusters: list[list] = []
-        for p in by_date[d]:
-            placed = False
-            pf = panel_family([p])
-            for cluster in clusters:
-                cf = panel_family(cluster)
-                if not panels_compatible(pf, cf):
-                    continue
-                same_panel = pf == cf and pf != "unknown"
-                if same_panel or looks_like_same_report([p], cluster):
-                    cluster.append(p)
-                    placed = True
-                    break
-            if not placed:
-                clusters.append([p])
-        # Merge clusters that are the same report (e.g. two files, slightly different rows)
-        i = 0
-        while i < len(clusters):
-            j = i + 1
-            while j < len(clusters):
-                if looks_like_same_report(clusters[i], clusters[j]) or (
-                    panels_compatible(panel_family(clusters[i]), panel_family(clusters[j]))
-                    and panel_family(clusters[i]) == panel_family(clusters[j])
-                    and panel_family(clusters[i]) != "unknown"
-                ):
-                    clusters[i].extend(clusters[j])
-                    clusters.pop(j)
-                    continue
-                j += 1
-            i += 1
-        merged_groups.extend(clusters)
+        merged_groups.extend(split_day_proposals(by_date[d]))
 
     groups: list[dict] = []
     for i, rows in enumerate(merged_groups):
@@ -637,6 +608,23 @@ def import_review(
         "pending": t(locale, "import_att_status_pending"),
         "processing": t(locale, "import_att_status_processing"),
     }
+    markers_by_att: dict[int, list] = {}
+    for p in proposals:
+        raw_aid = p.get("attachment_id")
+        if raw_aid is None or raw_aid == "":
+            continue
+        try:
+            aid = int(raw_aid)
+        except (TypeError, ValueError):
+            continue
+        markers_by_att.setdefault(aid, []).append(
+            SimpleNamespace(
+                label=(p.get("label") or "").strip() or "—",
+                value=p.get("value"),
+                unit=(p.get("unit") or "").strip(),
+                drawn_on=(p.get("proposed_drawn_on") or "").strip(),
+            )
+        )
     reextract_atts = []
     for i, a in enumerate(job_atts):
         if a.ocr_status not in {"done", "failed"}:
@@ -647,6 +635,7 @@ def import_review(
                 display_name=attachment_display_name(a, index=i + 1, total=len(job_atts)),
                 status=a.ocr_status,
                 status_label=status_labels.get(a.ocr_status, a.ocr_status),
+                markers=markers_by_att.get(a.id, []),
             )
         )
     return templates.TemplateResponse(
@@ -788,6 +777,30 @@ async def import_reextract(request: Request, db: DbDep, user: UserDep, job_id: i
         kick_import_worker()
         return redirect(f"/import/{job.id}/progress?tab=files")
     return redirect(f"/import/{job.id}/review?tab=files")
+
+
+@router.post("/{job_id}/remove-file")
+async def import_remove_file(request: Request, db: DbDep, locale: LocaleDep, user: UserDep, job_id: int):
+    """Delete one import file and drop its proposed results from review."""
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id or job.status not in {"review", "failed", "processing"}:
+        return redirect("/draws")
+
+    form = await read_form(request)
+    try:
+        att_id = int(form.get("attachment_id") or 0)
+    except (TypeError, ValueError):
+        att_id = 0
+    if not att_id:
+        return redirect(f"/import/{job.id}/review?tab=files")
+
+    result = remove_import_attachment(db, job, attachment_id=att_id)
+    if result == "job_deleted":
+        request.session["flash"] = t(locale, "document_discarded")
+        return redirect("/draws")
+    if result == "removed":
+        request.session["flash"] = t(locale, "import_file_removed")
+    return redirect(f"/import/{job_id}/review?tab=files")
 
 
 @router.post("/{job_id}/discard")
