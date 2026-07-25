@@ -89,6 +89,13 @@ JSON_ONLY_SYSTEM = (
     "Output a single JSON object only. No markdown fences, no analysis, no chain-of-thought."
 )
 
+DATE_DISCOVER_SHORT = """
+Return ONLY this tiny JSON (no other text):
+{"layout":"multi_column","dates":["YYYY-MM-DD","YYYY-MM-DD"]}
+List EVERY date COLUMN header above the lab value grid on this Czech report.
+If only one draw, use layout "single" and one date. Czech day-first.
+"""
+
 SINGLE_DRAW_HINT = """
 This image is a SINGLE-DRAW lab panel / EHR screenshot (not a multi-column history table).
 Return ONE draws[] object only. Include ALL visible numeric lab analytes (biochem + hematology).
@@ -107,6 +114,34 @@ def _encode_image(path: Path) -> tuple[str, str]:
     return mime, base64.b64encode(data).decode("ascii")
 
 
+def _balanced_json_slice(text: str, start: int) -> str | None:
+    """Return one top-level {...} starting at start, or None if unbalanced."""
+    if start < 0 or start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
 def _extract_json(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
@@ -117,25 +152,68 @@ def _extract_json(text: str) -> dict[str, Any]:
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if not m:
-            raise
-        return json.loads(m.group(0))
+        pass
+    # Prefer compact objects that look like our schema (avoid huge broken dumps).
+    for m in re.finditer(r"\{", text):
+        chunk = _balanced_json_slice(text, m.start())
+        if not chunk or len(chunk) > 8000:
+            continue
+        try:
+            data = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and ("layout" in data or "draws" in data or "dates" in data):
+            return data
+    for m in re.finditer(r"\{", text):
+        chunk = _balanced_json_slice(text, m.start())
+        if not chunk or len(chunk) > 8000:
+            continue
+        try:
+            data = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            return data
+    raise json.JSONDecodeError("Expecting value", text[:200], 0)
 
 
 def _message_text(msg: dict[str, Any]) -> str:
-    """Prefer final content; fall back to last JSON object in reasoning dump."""
+    """Prefer final content; fall back to JSON object in reasoning dump."""
     content = str(msg.get("content") or "").strip()
     if content:
-        return content
+        # Huge CoT leaked into content — still try to pull a small JSON object out.
+        if len(content) > 2000 and not content.lstrip().startswith("{"):
+            try:
+                return json.dumps(_extract_json(content), ensure_ascii=False)
+            except json.JSONDecodeError:
+                pass
+        elif content.lstrip().startswith("{") or len(content) <= 2000:
+            return content
+        try:
+            return json.dumps(_extract_json(content), ensure_ascii=False)
+        except json.JSONDecodeError:
+            return content
     reasoning = str(msg.get("reasoning_content") or "").strip()
     if not reasoning:
         return ""
-    matches = list(re.finditer(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", reasoning, re.DOTALL))
-    if matches:
-        return matches[-1].group(0)
-    m = re.search(r"\{.*\}", reasoning, re.DOTALL)
-    return m.group(0) if m else reasoning
+    try:
+        return json.dumps(_extract_json(reasoning), ensure_ascii=False)
+    except json.JSONDecodeError:
+        return reasoning
+
+
+def _scrape_iso_dates(text: str) -> list[str]:
+    """Pull ISO dates from free text / broken model output."""
+    from app.services.ocr_tables import find_dates_in_text
+
+    out: list[str] = []
+    for iso in find_dates_in_text(text or ""):
+        if iso not in out:
+            out.append(iso)
+    for m in re.finditer(r"\b(20\d{2}-\d{2}-\d{2})\b", text or ""):
+        if m.group(1) not in out:
+            out.append(m.group(1))
+    return out
 
 
 def _normalize_drawn_on(raw: str) -> str | None:
@@ -390,24 +468,41 @@ def _image_content(pages: list[Path]) -> list[dict]:
     return parts
 
 
-def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
-    content: list[dict] = [{"type": "text", "text": DATE_DISCOVER_HINT}, *_image_content(pages)]
-    text = _nvidia_chat(content, max_tokens=512)
-    data = _extract_json(text)
-    layout = str(data.get("layout") or "unknown").strip().lower()
+def _finalize_discovery(layout: str, raw_dates: list[Any]) -> tuple[str, list[str]]:
     if layout not in {"single", "multi_column", "unknown"}:
         layout = "unknown"
-    raw_dates = list(data.get("dates") or [])
     tentative: list[str] = []
     for raw in raw_dates:
         iso = _normalize_drawn_on(str(raw))
         if iso and iso not in tentative:
             tentative.append(iso)
-    # Model often returns every column date but still says layout=single.
     if layout in {"single", "unknown"} and _looks_like_history_columns(tentative):
         layout = "multi_column"
-    dates = _sanitize_discovered_dates(raw_dates, layout=layout)
+    dates = _sanitize_discovered_dates(list(raw_dates), layout=layout)
     return layout, dates
+
+
+def _discover_dates(pages: list[Path]) -> tuple[str, list[str]]:
+    last_text = ""
+    attempts: list[tuple[list[dict], int]] = [
+        ([{"type": "text", "text": DATE_DISCOVER_HINT}, *_image_content(pages)], 512),
+        ([{"type": "text", "text": DATE_DISCOVER_SHORT}, *_image_content(pages)], 256),
+    ]
+    for content, max_tokens in attempts:
+        try:
+            last_text = _nvidia_chat(content, max_tokens=max_tokens)
+            data = _extract_json(last_text)
+            layout = str(data.get("layout") or "unknown").strip().lower()
+            return _finalize_discovery(layout, list(data.get("dates") or []))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Date discovery attempt failed: %s", exc)
+
+    scraped = _scrape_iso_dates(last_text)
+    if scraped:
+        layout, dates = _finalize_discovery("unknown", scraped)
+        logger.info("Date discovery recovered via scrape: layout=%s dates=%s", layout, dates)
+        return layout, dates
+    return "unknown", []
 
 
 def _flatten_draws(parsed: dict[str, Any]) -> list[dict]:
@@ -464,6 +559,18 @@ def _build_extract_content(
                 ),
             }
         )
+    elif not force_single:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    "IMPORTANT: Czech hospital comparison tables often have several DATE COLUMNS "
+                    "(e.g. 14. 10. 2020 | 18. 5. 2016 | 14. 9. 2010). If you see multiple date "
+                    "headers above value columns, emit one draws[] entry PER column date — "
+                    "do not keep only the newest column."
+                ),
+            }
+        )
     if marker_hints:
         content.append(
             {
@@ -510,6 +617,36 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
         proposals = _flatten_draws(parsed)
 
         got_dates = sorted({p.get("proposed_drawn_on") for p in proposals if p.get("proposed_drawn_on")})
+
+        # If extract collapsed to ≤1 date, re-probe column headers and retry once.
+        if len(got_dates) <= 1:
+            try:
+                layout2, discovered2 = _discover_dates(pages)
+                if _looks_like_history_columns(discovered2) and (
+                    len(discovered2) > len(discovered) or layout != "multi_column"
+                ):
+                    logger.info(
+                        "Re-probed multi-column dates after single-draw extract: %s",
+                        discovered2,
+                    )
+                    layout, discovered = "multi_column", discovered2
+                    content_retry0 = _build_extract_content(
+                        pages,
+                        marker_hints=marker_hints,
+                        layout=layout,
+                        discovered=discovered,
+                    )
+                    text0 = _nvidia_chat(content_retry0, max_tokens=8192)
+                    parsed0 = _validate_smart_payload(_extract_json(text0))
+                    props0 = _flatten_draws(parsed0)
+                    got0 = sorted(
+                        {p.get("proposed_drawn_on") for p in props0 if p.get("proposed_drawn_on")}
+                    )
+                    if len(got0) > len(got_dates):
+                        text, proposals, parsed = text0, props0, parsed0
+                        got_dates = got0
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Smart multi-column re-probe failed: %s", exc)
 
         # Multi-column: retry if discovery dates missing from extract
         missing = [d for d in discovered if d not in got_dates]

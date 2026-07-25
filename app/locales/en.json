@@ -38,6 +38,7 @@
   "open_imports_title": "Reports to review",
   "import_status_processing": "processing",
   "import_status_review": "ready for review",
+  "import_status_failed": "failed",
   "upload_extends_hint": "Upload new reports via Upload report — the system assigns them to draws by date.",
   "existing_draw_hint": "You already have a draw on this day with the same lab.",
   "merge_into_existing": "Add to this draw",

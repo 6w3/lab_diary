@@ -10,26 +10,100 @@
 </div>
 
 {% if open_jobs %}
-<section class="card open-imports" aria-label="{{ t('open_imports_title') }}">
+<section class="card open-imports" id="open-imports"
+         aria-label="{{ t('open_imports_title') }}"
+         data-label-review="{{ t('import_status_review') }}"
+         data-label-processing="{{ t('import_status_processing') }}"
+         data-label-failed="{{ t('import_status_failed') }}">
   <h2>{{ t('open_imports_title') }}</h2>
-  <ul class="list">
+  <ul class="list" id="open-imports-list">
     {% for j in open_jobs %}
-    <li>
+    <li class="open-import-item" data-job-id="{{ j.id }}" data-status="{{ j.status }}">
       {% if j.status == 'review' %}
       <a href="/import/{{ j.id }}/review">
         <strong>#{{ j.id }}</strong> — {{ j.filename }}
-        <span class="badge">{{ t('import_status_review') }}</span>
+        <span class="badge open-import-status">{{ t('import_status_review') }}</span>
       </a>
       {% else %}
       <a href="/import/{{ j.id }}/progress">
         <strong>#{{ j.id }}</strong> — {{ j.filename }}
-        <span class="muted">{{ t('import_status_processing') }}</span>
+        <span class="muted open-import-status">{{ t('import_status_processing') }}</span>
       </a>
       {% endif %}
     </li>
     {% endfor %}
   </ul>
 </section>
+<script>
+(function () {
+  const root = document.getElementById("open-imports");
+  if (!root) return;
+  const labelReview = root.dataset.labelReview || "";
+  const labelFailed = root.dataset.labelFailed || "";
+  const items = Array.from(root.querySelectorAll(".open-import-item[data-status='processing']"));
+  if (!items.length) return;
+
+  const pending = new Set(items.map((el) => el.dataset.jobId));
+  let timer = null;
+
+  function markReview(li) {
+    const id = li.dataset.jobId;
+    const a = li.querySelector("a");
+    const statusEl = li.querySelector(".open-import-status");
+    if (a) a.setAttribute("href", "/import/" + id + "/review");
+    if (statusEl) {
+      statusEl.className = "badge open-import-status";
+      statusEl.textContent = labelReview;
+    }
+    li.dataset.status = "review";
+    pending.delete(id);
+  }
+
+  function markFailed(li) {
+    const id = li.dataset.jobId;
+    const a = li.querySelector("a");
+    const statusEl = li.querySelector(".open-import-status");
+    if (a) a.setAttribute("href", "/import/" + id + "/progress");
+    if (statusEl) {
+      statusEl.className = "error open-import-status";
+      statusEl.textContent = labelFailed;
+    }
+    li.dataset.status = "failed";
+    pending.delete(id);
+  }
+
+  async function pollOne(li) {
+    const id = li.dataset.jobId;
+    try {
+      const res = await fetch("/import/" + id + "/progress.json", {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.status === "review") markReview(li);
+      else if (data.status === "failed") markFailed(li);
+    } catch (_err) {
+      // keep polling
+    }
+  }
+
+  async function tick() {
+    const still = Array.from(pending);
+    if (!still.length) {
+      if (timer) clearInterval(timer);
+      return;
+    }
+    const lis = still
+      .map((id) => root.querySelector('.open-import-item[data-job-id="' + id + '"]'))
+      .filter(Boolean);
+    await Promise.all(lis.map(pollOne));
+  }
+
+  tick();
+  timer = setInterval(tick, 2000);
+})();
+</script>
 {% endif %}
 
 {% if not draws %}

@@ -38,6 +38,7 @@
   "open_imports_title": "Reporty ke kontrole",
   "import_status_processing": "načítá se",
   "import_status_review": "ke kontrole",
+  "import_status_failed": "selhalo",
   "upload_extends_hint": "Nový report nahraj přes Nahrát report — systém ho přiřadí k odběrům podle data.",
   "existing_draw_hint": "Pro tento den už máš odběr se stejnou laboratoří.",
   "merge_into_existing": "Přidat do tohoto odběru",

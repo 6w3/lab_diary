@@ -7,6 +7,7 @@ from app.services.smart_extract import (
     _looks_like_history_columns,
     _message_text,
     _sanitize_discovered_dates,
+    _scrape_iso_dates,
     looks_like_hallucinated_extract,
 )
 
@@ -97,3 +98,26 @@ def test_extract_json_rejects_empty():
         assert False, "expected JSONDecodeError"
     except json.JSONDecodeError:
         pass
+
+
+def test_extract_json_balanced_from_noise():
+    blob = 'noise {"layout":"multi_column","dates":["2020-10-14","2016-05-18"]} trailing'
+    assert _extract_json(blob)["layout"] == "multi_column"
+    assert len(_extract_json(blob)["dates"]) == 2
+
+
+def test_extract_json_skips_huge_unbalanced():
+    # Greedy old regex would choke; balanced scanner should still find the small object.
+    huge = '{"layout":"single","dates":["2020-10-14"],"notes":"' + ("x" * 100)
+    wrapped = 'prefix {"layout":"multi_column","dates":["2020-10-14","2016-05-18","2010-09-14"]} ' + huge
+    data = _extract_json(wrapped)
+    assert data["layout"] == "multi_column"
+    assert len(data["dates"]) == 3
+
+
+def test_scrape_iso_dates_czech_and_iso():
+    text = "headers 14. 10. 2020 10:30 and 18. 5. 2016 plus 2010-09-14"
+    dates = _scrape_iso_dates(text)
+    assert "2020-10-14" in dates
+    assert "2016-05-18" in dates
+    assert "2010-09-14" in dates
