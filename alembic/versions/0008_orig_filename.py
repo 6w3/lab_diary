@@ -1,6 +1,6 @@
 """Add original_filename to attachments
 
-Revision ID: 0008_attachment_original_filename
+Revision ID: 0008_orig_filename
 Revises: 0007_draw_attachments
 Create Date: 2026-07-25
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0008_attachment_original_filename"
+revision = "0008_orig_filename"
 down_revision = "0007_draw_attachments"
 branch_labels = None
 depends_on = None
@@ -23,6 +23,8 @@ def _has_column(table: str, column: str) -> bool:
 
 
 def upgrade() -> None:
+    # alembic_version.version_num is VARCHAR(32); widen for longer revision ids
+    op.execute("ALTER TABLE alembic_version MODIFY version_num VARCHAR(64) NOT NULL")
     if _has_column("attachments", "original_filename"):
         return
     with op.batch_alter_table("attachments") as batch:
