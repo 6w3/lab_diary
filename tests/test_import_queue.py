@@ -238,3 +238,37 @@ def test_retry_failed_attachments_while_processing():
     assert running.ocr_status == "processing"
     assert job.status == "processing"
     assert job_payload(job).get("file_errors") == []
+
+
+def test_queue_attachment_reextract_drops_proposals_and_stores_hint():
+    from app.services.import_process import queue_attachment_reextract
+
+    job = SimpleNamespace(
+        id=1,
+        status="review",
+        proposals_json=(
+            '{"proposals":['
+            '{"label":"HGB","attachment_id":10,"uid":"a"},'
+            '{"label":"RBC","attachment_id":11,"uid":"b"}'
+            '],"file_errors":[]}'
+        ),
+        user_id=1,
+        ocr_raw_text=None,
+    )
+    done = SimpleNamespace(
+        id=10, import_job_id=1, ocr_status="done", filename="a.jpg", ocr_raw_text="{}"
+    )
+    other = SimpleNamespace(
+        id=11, import_job_id=1, ocr_status="done", filename="b.jpg", ocr_raw_text="{}"
+    )
+    db = _FakeDB(attachments=[done, other], jobs=[job])
+    ok = queue_attachment_reextract(
+        db, job, attachment_id=10, user_hint="sloupce jsou data"
+    )
+    assert ok is True
+    assert done.ocr_status == "pending"
+    assert done.ocr_raw_text is None
+    assert job.status == "processing"
+    payload = job_payload(job)
+    assert [p["label"] for p in payload["proposals"]] == ["RBC"]
+    assert payload["extract_hints"]["10"] == "sloupce jsou data"

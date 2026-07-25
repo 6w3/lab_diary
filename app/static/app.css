@@ -149,6 +149,22 @@ button.link { background: none; color: var(--danger); border: none; padding: 0; 
 }
 .file-error-list .inline-form { display: inline; margin: 0; }
 .file-error-list button { padding: 0.25rem 0.55rem; font-size: 0.85rem; }
+.reextract-box h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.reextract-form {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--border);
+}
+.reextract-form:first-of-type { border-top: none; }
+.reextract-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.reextract-form textarea { width: 100%; min-height: 2.8rem; resize: vertical; }
+.reextract-form button { justify-self: start; }
 .file-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));

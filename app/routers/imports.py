@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime
+from types import SimpleNamespace
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -28,6 +29,7 @@ from app.services.import_process import (
     maybe_finalize_idle_jobs,
     prepare_review_proposals,
     process_claimed_attachment,
+    queue_attachment_reextract,
     retry_failed_attachments,
     save_job_payload,
 )
@@ -558,6 +560,24 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
     groups = _build_groups(db, user.id, proposals, lab_name)
     catalog = db.query(Marker).order_by(Marker.name_cs).all()
     still_running = job.status == "processing" and job_has_active_attachments(db, job.id)
+    status_labels = {
+        "done": t(locale, "import_att_status_done"),
+        "failed": t(locale, "import_att_status_failed"),
+        "pending": t(locale, "import_att_status_pending"),
+        "processing": t(locale, "import_att_status_processing"),
+    }
+    reextract_atts = []
+    for i, a in enumerate(job_atts):
+        if a.ocr_status not in {"done", "failed"}:
+            continue
+        reextract_atts.append(
+            SimpleNamespace(
+                id=a.id,
+                display_name=attachment_display_name(a, index=i + 1, total=len(job_atts)),
+                status=a.ocr_status,
+                status_label=status_labels.get(a.ocr_status, a.ocr_status),
+            )
+        )
     return templates.TemplateResponse(
         request,
         "import/review.html",
@@ -577,6 +597,8 @@ def import_review(request: Request, db: DbDep, locale: LocaleDep, user: UserDep,
             multi_date=multi_date,
             still_running=still_running,
             progress_url=f"/import/{job.id}/progress",
+            reextract_atts=reextract_atts,
+            smart_available=smart_enabled(),
         ),
     )
 
@@ -645,6 +667,28 @@ async def import_retry_files(request: Request, db: DbDep, user: UserDep, job_id:
     if job.status == "processing":
         return redirect(f"/import/{job.id}/progress")
     return redirect("/draws")
+
+
+@router.post("/{job_id}/reextract")
+async def import_reextract(request: Request, db: DbDep, user: UserDep, job_id: int):
+    """Re-read one attachment with optional Smart user hint; replace its proposals."""
+    job = db.get(ImportJob, job_id)
+    if not job or job.user_id != user.id or job.status not in {"review", "failed", "processing"}:
+        return redirect("/draws")
+
+    form = await read_form(request)
+    try:
+        att_id = int(form.get("attachment_id") or 0)
+    except (TypeError, ValueError):
+        att_id = 0
+    hint = (form.get("user_hint") or "").strip()
+    if not att_id:
+        return redirect(f"/import/{job.id}/review")
+    ok = queue_attachment_reextract(db, job, attachment_id=att_id, user_hint=hint)
+    if ok:
+        kick_import_worker()
+        return redirect(f"/import/{job.id}/progress")
+    return redirect(f"/import/{job.id}/review")
 
 
 @router.post("/{job_id}/discard")

@@ -29,17 +29,26 @@ def job_payload(job: ImportJob) -> dict:
 
 
 def save_job_payload(job: ImportJob, payload: dict) -> None:
-    job.proposals_json = json.dumps(payload, ensure_ascii=False)
+    # OCR full text lives on attachments / job.ocr_raw_text — never bloat JSON.
+    clean = dict(payload)
+    clean.pop("raw_parts", None)
+    job.proposals_json = json.dumps(clean, ensure_ascii=False)
 
 
 def extract_file(
     storage_path: str,
     mode: str,
     marker_hints: list[str],
+    *,
+    user_hint: str | None = None,
 ) -> tuple[str, list[dict], dict]:
     if mode == "smart":
         try:
-            raw, proposals, meta = run_smart_extract(storage_path, marker_hints=marker_hints)
+            raw, proposals, meta = run_smart_extract(
+                storage_path,
+                marker_hints=marker_hints,
+                user_hint=user_hint,
+            )
             proposals, raw, merge_meta = prefer_multi_date_proposals(storage_path, proposals, raw)
             meta = {**(meta or {}), **merge_meta}
             return raw, proposals, meta
@@ -424,6 +433,49 @@ def retry_failed_attachments(
     return len(atts)
 
 
+def queue_attachment_reextract(
+    db: Session,
+    job: ImportJob,
+    *,
+    attachment_id: int,
+    user_hint: str = "",
+) -> bool:
+    """Drop proposals for one file and re-queue extract (optional Smart user hint)."""
+    if job.status not in {"review", "failed", "processing"}:
+        return False
+    att = db.get(Attachment, attachment_id)
+    if not att or att.import_job_id != job.id:
+        return False
+    if att.ocr_status not in {"failed", "done"}:
+        return False
+
+    hint = (user_hint or "").strip()[:1500]
+    payload = job_payload(job)
+    payload["proposals"] = [
+        p
+        for p in (payload.get("proposals") or [])
+        if p.get("attachment_id") != att.id
+    ]
+    payload["file_errors"] = [
+        e
+        for e in (payload.get("file_errors") or [])
+        if e.get("attachment_id") != att.id
+    ]
+    hints = dict(payload.get("extract_hints") or {})
+    if hint:
+        hints[str(att.id)] = hint
+    else:
+        hints.pop(str(att.id), None)
+    payload["extract_hints"] = hints
+    save_job_payload(job, payload)
+
+    att.ocr_status = "pending"
+    att.ocr_raw_text = None
+    job.status = "processing"
+    db.commit()
+    return True
+
+
 def claim_next_attachment(db: Session) -> tuple[int, int, str, str, str] | None:
     """Claim one pending attachment for any processing job.
 
@@ -501,14 +553,29 @@ def process_claimed_attachment(
     mode: str,
 ) -> dict[str, Any]:
     """Run extract for a claimed attachment and merge into the job. Returns status info."""
+    from app.services.smart_extract import smart_enabled
+
     catalog = db.query(Marker).all()
     marker_hints = [
         f"{m.code}={m.name_cs}"
         + (f"/{m.name_en}" if (m.name_en or "") and m.name_en != m.name_cs else "")
         for m in catalog
     ]
+    job_peek = db.get(ImportJob, job_id)
+    hint = ""
+    if job_peek:
+        hints = (job_payload(job_peek).get("extract_hints") or {})
+        hint = str(hints.get(str(att_id)) or "").strip()
+    extract_mode = mode
+    if hint and smart_enabled():
+        extract_mode = "smart"
     try:
-        raw, proposals, meta = extract_file(storage_path, mode, marker_hints)
+        raw, proposals, meta = extract_file(
+            storage_path,
+            extract_mode,
+            marker_hints,
+            user_hint=hint or None,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Import extract failed att=%s job=%s", att_id, job_id)
         att = db.get(Attachment, att_id)
@@ -544,6 +611,10 @@ def process_claimed_attachment(
     from app.services.proposal_filter import filter_proposals
 
     payload = job_payload(job)
+    # Consume one-shot hint after extract.
+    hints = dict(payload.get("extract_hints") or {})
+    hints.pop(str(att_id), None)
+    payload["extract_hints"] = hints
     file_lab = ((meta or {}).get("lab_name") or "").strip() or None
     file_wp = ((meta or {}).get("workplace") or "").strip() or None
     for p in filter_proposals(proposals):

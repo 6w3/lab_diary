@@ -593,8 +593,20 @@ def _build_extract_content(
     layout: str,
     discovered: list[str],
     force_single: bool = False,
+    user_hint: str | None = None,
 ) -> list[dict]:
     content: list[dict] = [{"type": "text", "text": SMART_SCHEMA_HINT}]
+    hint = (user_hint or "").strip()[:1500]
+    if hint:
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    "USER CORRECTION — follow this carefully when interpreting the document:\n"
+                    + hint
+                ),
+            }
+        )
     effective_layout = layout
     if (
         not force_single
@@ -661,7 +673,12 @@ def _build_extract_content(
     return content
 
 
-def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) -> tuple[str, list[dict], dict]:
+def run_smart_extract(
+    storage_path: str,
+    marker_hints: list[str] | None = None,
+    *,
+    user_hint: str | None = None,
+) -> tuple[str, list[dict], dict]:
     """Call NVIDIA VLM; return (raw_json, flat proposals, meta)."""
     settings = get_settings()
     if not settings.nvidia_api_key:
@@ -687,6 +704,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
             marker_hints=marker_hints,
             layout=layout,
             discovered=discovered,
+            user_hint=user_hint,
         )
         text = _nvidia_chat(content, max_tokens=8192)
         parsed = _validate_smart_payload(_extract_json(text))
@@ -709,6 +727,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
                         marker_hints=marker_hints,
                         layout=layout,
                         discovered=discovered,
+                        user_hint=user_hint,
                     )
                     text_fix = _nvidia_chat(content_fix, max_tokens=8192)
                     parsed_fix = _validate_smart_payload(_extract_json(text_fix))
@@ -772,6 +791,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
                         marker_hints=marker_hints,
                         layout=layout,
                         discovered=discovered,
+                        user_hint=user_hint,
                     )
                     text0 = _nvidia_chat(content_retry0, max_tokens=8192)
                     parsed0 = _validate_smart_payload(_extract_json(text0))
@@ -793,6 +813,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
                 marker_hints=marker_hints,
                 layout=layout,
                 discovered=discovered,
+                user_hint=user_hint,
             )
             content_retry.insert(
                 1,
@@ -831,6 +852,7 @@ def run_smart_extract(storage_path: str, marker_hints: list[str] | None = None) 
                     layout="single",
                     discovered=discovered[:1],
                     force_single=True,
+                    user_hint=user_hint,
                 )
                 text3 = _nvidia_chat(content_single, max_tokens=8192)
                 parsed3 = _validate_smart_payload(_extract_json(text3))
