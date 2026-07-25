@@ -8,6 +8,8 @@ from app.services.trend_analysis import (
     ANALYSIS_SYSTEM,
     analyze_trends,
     charts_to_analysis_payload,
+    load_user_analysis,
+    save_user_analysis,
 )
 
 
@@ -90,3 +92,28 @@ def test_analyze_trends_requires_payload():
     with patch("app.services.trend_analysis.smart_enabled", return_value=True):
         with pytest.raises(RuntimeError, match="No trend data"):
             analyze_trends([], locale="en")
+
+
+def test_save_and_load_user_analysis(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path))
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        saved = save_user_analysis(42, "## Hello\n\nBody text.")
+        assert saved["text"].startswith("## Hello")
+        loaded = load_user_analysis(42)
+        assert loaded is not None
+        assert loaded["text"] == saved["text"]
+        assert loaded.get("generated_at")
+        assert load_user_analysis(99) is None
+    finally:
+        get_settings.cache_clear()
+
+
+def test_analyze_trends_rejects_empty_nvidia():
+    with patch("app.services.trend_analysis.smart_enabled", return_value=True), patch(
+        "app.services.trend_analysis._nvidia_chat", return_value="   "
+    ):
+        with pytest.raises(RuntimeError, match="empty"):
+            analyze_trends([{"marker": "x", "points": [{"date": "2020-01-01", "value": 1}]}], locale="en")

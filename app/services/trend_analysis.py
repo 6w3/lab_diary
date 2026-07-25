@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 
 from app.services.smart_extract import _nvidia_chat, smart_enabled
+from app.services.storage import ensure_upload_dir
 
 ANALYSIS_SYSTEM = (
     "You are a careful health educator summarizing personal laboratory trends. "
@@ -82,4 +85,37 @@ def analyze_trends(payload: list[dict], *, locale: str = "cs") -> str:
         max_tokens=4096,
         temperature=0.3,
     )
-    return (text or "").strip()
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise RuntimeError("NVIDIA returned empty analysis")
+    return cleaned
+
+
+def _analysis_path(user_id: int) -> Path:
+    base = ensure_upload_dir() / "trend_analysis"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"user_{int(user_id)}.json"
+
+
+def save_user_analysis(user_id: int, text: str) -> dict:
+    """Persist analysis on disk (cookie session cannot hold long text)."""
+    payload = {
+        "text": text,
+        "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+    }
+    path = _analysis_path(user_id)
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return payload
+
+
+def load_user_analysis(user_id: int) -> dict | None:
+    path = _analysis_path(user_id)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict) or not (data.get("text") or "").strip():
+        return None
+    return data
