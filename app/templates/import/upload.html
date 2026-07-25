@@ -71,6 +71,13 @@
     return accept.length === 0 || accept.indexOf(ext) >= 0;
   }
 
+  // Accumulate drops/picks; each new selection appends (does not replace).
+  let queued = [];
+
+  function fileKey(f) {
+    return (f.name || "") + "|" + f.size + "|" + f.lastModified;
+  }
+
   function renderFiles(files) {
     const arr = Array.from(files || []);
     if (!arr.length) {
@@ -88,17 +95,32 @@
     }).join("");
   }
 
-  function setFiles(fileList) {
-    const picked = Array.from(fileList || []).filter(extOk);
-    if (!picked.length) return;
-    if (picked.length > maxFiles) {
-      window.alert(zone.dataset.labelTooMany || "");
-      return;
-    }
+  function applyQueued() {
     const dt = new DataTransfer();
-    picked.forEach(function (f) { dt.items.add(f); });
+    queued.forEach(function (f) { dt.items.add(f); });
     input.files = dt.files;
     renderFiles(input.files);
+  }
+
+  function addFiles(fileList) {
+    const picked = Array.from(fileList || []).filter(extOk);
+    if (!picked.length) return;
+    const seen = new Set(queued.map(fileKey));
+    let overflow = false;
+    picked.forEach(function (f) {
+      const k = fileKey(f);
+      if (seen.has(k)) return;
+      if (queued.length >= maxFiles) {
+        overflow = true;
+        return;
+      }
+      queued.push(f);
+      seen.add(k);
+    });
+    if (overflow) {
+      window.alert(zone.dataset.labelTooMany || "");
+    }
+    applyQueued();
   }
 
   zone.addEventListener("click", function (e) {
@@ -107,7 +129,8 @@
   });
 
   input.addEventListener("change", function () {
-    renderFiles(input.files);
+    // Browser replaces FileList on browse; merge into queued then rewrite input.
+    addFiles(input.files);
   });
 
   ["dragenter", "dragover"].forEach(function (ev) {
@@ -126,7 +149,7 @@
   });
   zone.addEventListener("drop", function (e) {
     if (e.dataTransfer && e.dataTransfer.files) {
-      setFiles(e.dataTransfer.files);
+      addFiles(e.dataTransfer.files);
     }
   });
 
